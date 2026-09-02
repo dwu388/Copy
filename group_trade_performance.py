@@ -379,7 +379,6 @@ def summarize_lots(lots):
     realized = [lot for lot in lots if lot["Realized ROI"] is not None]
     profitable = [lot for lot in realized if lot["Realized P/L"] > 1e-9]
     losing = [lot for lot in realized if lot["Realized P/L"] < -1e-9]
-    open_only = [lot for lot in lots if lot["Realized Outcome"] == "Open only"]
     matched_entry = sum(lot["Matched Entry Value"] for lot in lots)
     sale_proceeds = sum(lot["Sale Proceeds"] for lot in lots)
     realized_pnl = sale_proceeds - matched_entry
@@ -389,8 +388,6 @@ def summarize_lots(lots):
         "Realized Lots": len(realized),
         "Profitable Lots": len(profitable),
         "Losing Lots": len(losing),
-        "Open-only Lots": len(open_only),
-        "Realization Rate": len(realized) / len(lots) if lots else None,
         "Win Rate": len(profitable) / len(realized) if realized else None,
         "Average Entry MC": average_or_none([lot["Entry MC"] for lot in lots]),
         "Median Entry MC": median_or_none([lot["Entry MC"] for lot in lots]),
@@ -429,12 +426,8 @@ PERFORMANCE_HEADERS = [
     "Realized Lots",
     "Profitable Lots",
     "Losing Lots",
-    "Open-only Lots",
-    "Realization Rate",
     "Win Rate",
     "Average Entry MC",
-    "Median Entry MC",
-    "Average Original Buy",
     "Median Original Buy",
     "Matched Entry Value",
     "Sale Proceeds",
@@ -475,7 +468,6 @@ def format_cell_for_header(cell, header):
     }:
         cell.number_format = CURRENCY_FORMAT
     elif header in {
-        "Realization Rate",
         "Win Rate",
         "Realized ROI",
         "Average Lot ROI",
@@ -493,7 +485,6 @@ def format_cell_for_header(cell, header):
         "Realized Lots",
         "Profitable Lots",
         "Losing Lots",
-        "Open-only Lots",
         "Sell Alerts",
     }:
         cell.number_format = "#,##0"
@@ -563,8 +554,7 @@ def write_under_75_analysis(workbook, under_75_lots):
         2,
         1,
         "Buy lots are classified by entry MC. Later sells are matched FIFO by trader and coin. "
-        "Open-only means no matched sell was observed, so it is unresolved rather than a realized loss. "
-        "The combined loss/open-only row is useful for screening, but realized win rate excludes open-only lots.",
+        "Realized comparisons use only the matched portion; open exposure is reported separately.",
     )
     note.fill = LIGHT_BLUE_FILL
     note.alignment = Alignment(wrap_text=True, vertical="center")
@@ -576,8 +566,6 @@ def write_under_75_analysis(workbook, under_75_lots):
         ("Lots with realized sales", overall["Realized Lots"], "integer"),
         ("Profitable realized lots", overall["Profitable Lots"], "integer"),
         ("Losing realized lots", overall["Losing Lots"], "integer"),
-        ("Open-only lots", overall["Open-only Lots"], "integer"),
-        ("Realization rate", overall["Realization Rate"], "percent"),
         ("Win rate", overall["Win Rate"], "percent"),
         ("Copy buy volume", overall["Copy Buy Volume"], "currency"),
         ("Matched entry value", overall["Matched Entry Value"], "currency"),
@@ -595,8 +583,8 @@ def write_under_75_analysis(workbook, under_75_lots):
     overview_title.font = WHITE_FONT
 
     for index, (label, value, value_type) in enumerate(overview_metrics):
-        block = 0 if index < 7 else 3
-        row_number = 5 + (index % 7)
+        block = 0 if index < 6 else 3
+        row_number = 5 + (index % 6)
         label_cell = worksheet.cell(row_number, 1 + block, label)
         value_cell = worksheet.cell(row_number, 2 + block, value)
         label_cell.fill = LIGHT_GRAY_FILL
@@ -611,31 +599,23 @@ def write_under_75_analysis(workbook, under_75_lots):
         else:
             value_cell.number_format = "#,##0"
 
-    current_row = 13
+    current_row = 12
     outcome_rows = []
-    for outcome in ["Profit", "Loss", "Open only", "Breakeven"]:
-        selected = [lot for lot in under_75_lots if lot["Realized Outcome"] == outcome]
+    for outcome in ["Profit", "Loss", "Breakeven"]:
+        selected = [
+            lot for lot in under_75_lots if lot["Realized Outcome"] == outcome
+        ]
         if selected:
             outcome_rows.append(performance_row(outcome, selected))
-
-    loss_or_open = [
-        lot
-        for lot in under_75_lots
-        if lot["Realized Outcome"] in {"Loss", "Open only"}
-    ]
-    if loss_or_open:
-        outcome_rows.append(performance_row("Loss or open only", loss_or_open))
-
     realized_lots = [
         lot for lot in under_75_lots if lot["Realized ROI"] is not None
     ]
     if realized_lots:
         outcome_rows.append(performance_row("All realized", realized_lots))
-    outcome_rows.append(performance_row("All lots", under_75_lots))
     _, _, outcome_last = write_analysis_table(
         worksheet,
         current_row,
-        "Profit vs. Realized Loss vs. Open-only",
+        "Profit vs. Loss Comparison",
         PERFORMANCE_HEADERS,
         outcome_rows,
     )
