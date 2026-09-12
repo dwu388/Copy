@@ -7,6 +7,10 @@ Usage:
 Optional output path:
     python group_trade_performance.py input.xlsx --output grouped_trade_performance.xlsx
 
+Output sheets:
+- MC x Buy Size: grouped performance sorted by realized ROI, with Excel filters.
+- Top & Bottom Trades: top 50 realized ROIs and largest 50 realized dollar losses.
+
 Assumptions:
 - Copy ratio defaults to 1:10, so a trader's $1,000 trade becomes a $100 copied trade.
 - Buy lots are tracked separately by trader + coin.
@@ -23,7 +27,6 @@ import re
 from collections import defaultdict, deque
 from copy import copy
 from pathlib import Path
-from statistics import mean, median
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.formatting.rule import CellIsRule
@@ -263,11 +266,8 @@ def analyze(trades):
                 }
             )
 
-    under_75_lots = []
+    trade_lots = []
     for lot in all_lots:
-        if lot["entry_mc"] >= 75_000:
-            continue
-
         realized_pnl = lot["sale_proceeds"] - lot["sold_entry_value"]
         realized_roi = (
             realized_pnl / lot["sold_entry_value"]
@@ -312,20 +312,14 @@ def analyze(trades):
         else:
             position_status = "Partially sold"
 
-        under_75_lots.append(
+        trade_lots.append(
             {
                 "Lot": lot["lot_id"],
                 "Trader": lot["trader"],
                 "Coin": lot["coin"],
                 "Buy Time": lot["buy_time"],
                 "Entry MC": lot["entry_mc"],
-                "MC Band": (
-                    "<$25k"
-                    if lot["entry_mc"] < 25_000
-                    else "$25k-$50k"
-                    if lot["entry_mc"] < 50_000
-                    else "$50k-$75k"
-                ),
+                "Entry MC Group": find_bin(lot["entry_mc"], MC_BINS),
                 "Buy Size Group": find_bin(lot["original_buy"], BUY_SIZE_BINS),
                 "Original Buy": lot["original_buy"],
                 "Copy Buy": lot["copy_buy"],
@@ -346,8 +340,14 @@ def analyze(trades):
             }
         )
 
-    under_75_lots.sort(key=lambda lot: lot["Buy Time"])
-    return rows, under_75_lots
+    rows.sort(
+        key=lambda row: (
+            row["Realized ROI"] is None,
+            -(row["Realized ROI"] if row["Realized ROI"] is not None else 0),
+        )
+    )
+    trade_lots.sort(key=lambda lot: lot["Buy Time"])
+    return rows, trade_lots
 
 
 NAVY_FILL = PatternFill("solid", fgColor="17365D")
@@ -355,7 +355,6 @@ BLUE_FILL = PatternFill("solid", fgColor="5B9BD5")
 LIGHT_BLUE_FILL = PatternFill("solid", fgColor="D9EAF7")
 LIGHT_GREEN_FILL = PatternFill("solid", fgColor="E2F0D9")
 LIGHT_RED_FILL = PatternFill("solid", fgColor="FCE4D6")
-LIGHT_GRAY_FILL = PatternFill("solid", fgColor="E7E6E6")
 WHITE_FONT = Font(color="FFFFFF", bold=True)
 TITLE_FONT = Font(color="FFFFFF", bold=True, size=16)
 THIN_GRAY_BORDER = Border(bottom=Side(style="thin", color="BFBFBF"))
@@ -363,88 +362,6 @@ CURRENCY_FORMAT = '$#,##0.00;[Red]($#,##0.00);-'
 MC_FORMAT = '$#,##0;[Red]($#,##0);-'
 PERCENT_FORMAT = '0.0%;[Red](0.0%);-'
 NUMBER_FORMAT = '#,##0.00;[Red](#,##0.00);-'
-
-
-def average_or_none(values):
-    values = [value for value in values if value is not None]
-    return mean(values) if values else None
-
-
-def median_or_none(values):
-    values = [value for value in values if value is not None]
-    return median(values) if values else None
-
-
-def summarize_lots(lots):
-    realized = [lot for lot in lots if lot["Realized ROI"] is not None]
-    profitable = [lot for lot in realized if lot["Realized P/L"] > 1e-9]
-    losing = [lot for lot in realized if lot["Realized P/L"] < -1e-9]
-    matched_entry = sum(lot["Matched Entry Value"] for lot in lots)
-    sale_proceeds = sum(lot["Sale Proceeds"] for lot in lots)
-    realized_pnl = sale_proceeds - matched_entry
-
-    return {
-        "Buy Lots": len(lots),
-        "Realized Lots": len(realized),
-        "Profitable Lots": len(profitable),
-        "Losing Lots": len(losing),
-        "Win Rate": len(profitable) / len(realized) if realized else None,
-        "Average Entry MC": average_or_none([lot["Entry MC"] for lot in lots]),
-        "Median Entry MC": median_or_none([lot["Entry MC"] for lot in lots]),
-        "Average Original Buy": average_or_none(
-            [lot["Original Buy"] for lot in lots]
-        ),
-        "Median Original Buy": median_or_none(
-            [lot["Original Buy"] for lot in lots]
-        ),
-        "Copy Buy Volume": sum(lot["Copy Buy"] for lot in lots),
-        "Matched Entry Value": matched_entry,
-        "Sale Proceeds": sale_proceeds,
-        "Realized P/L": realized_pnl,
-        "Realized ROI": realized_pnl / matched_entry if matched_entry else None,
-        "Remaining Entry Value": sum(
-            lot["Remaining Entry Value"] for lot in lots
-        ),
-        "Average Hours to First Sell": average_or_none(
-            [lot["Hours to First Sell"] for lot in realized]
-        ),
-        "Median Hours to First Sell": median_or_none(
-            [lot["Hours to First Sell"] for lot in realized]
-        ),
-        "Average Lot ROI": average_or_none(
-            [lot["Realized ROI"] for lot in realized]
-        ),
-        "Median Lot ROI": median_or_none(
-            [lot["Realized ROI"] for lot in realized]
-        ),
-    }
-
-
-PERFORMANCE_HEADERS = [
-    "Group",
-    "Buy Lots",
-    "Realized Lots",
-    "Profitable Lots",
-    "Losing Lots",
-    "Win Rate",
-    "Average Entry MC",
-    "Median Original Buy",
-    "Matched Entry Value",
-    "Sale Proceeds",
-    "Realized P/L",
-    "Realized ROI",
-    "Remaining Entry Value",
-    "Average Hours to First Sell",
-    "Median Lot ROI",
-]
-
-
-def performance_row(label, lots):
-    summary = summarize_lots(lots)
-    return {
-        "Group": label,
-        **{header: summary[header] for header in PERFORMANCE_HEADERS[1:]},
-    }
 
 
 def format_cell_for_header(cell, header):
@@ -526,19 +443,76 @@ def write_analysis_table(worksheet, start_row, title, headers, data_rows):
     return header_row, first_data_row, last_data_row
 
 
-def write_under_75_analysis(workbook, under_75_lots):
-    worksheet = workbook.create_sheet("Under $75k Analysis")
+TRADE_HEADERS = [
+    "Lot",
+    "Trader",
+    "Coin",
+    "Buy Time",
+    "Entry MC",
+    "Entry MC Group",
+    "Buy Size Group",
+    "Original Buy",
+    "Copy Buy",
+    "Position Status",
+    "Realized Outcome",
+    "Sell Alerts",
+    "First Sell Time",
+    "Last Sell Time",
+    "Hours to First Sell",
+    "Hours to Last Sell",
+    "Average Exit MC",
+    "Matched Entry Value",
+    "Sale Proceeds",
+    "Realized P/L",
+    "Realized ROI",
+    "Remaining Entry Value",
+    "Open %",
+]
+
+
+def add_trade_conditional_formatting(
+    worksheet, headers, first_data_row, last_data_row
+):
+    if first_data_row > last_data_row:
+        return
+
+    for header in ["Realized P/L", "Realized ROI"]:
+        column_number = headers.index(header) + 1
+        cell_range = (
+            f"{get_column_letter(column_number)}{first_data_row}:"
+            f"{get_column_letter(column_number)}{last_data_row}"
+        )
+        worksheet.conditional_formatting.add(
+            cell_range,
+            CellIsRule(
+                operator="greaterThan",
+                formula=["0"],
+                fill=LIGHT_GREEN_FILL,
+            ),
+        )
+        worksheet.conditional_formatting.add(
+            cell_range,
+            CellIsRule(
+                operator="lessThan",
+                formula=["0"],
+                fill=LIGHT_RED_FILL,
+            ),
+        )
+
+
+def write_ranked_trade_analysis(workbook, trade_lots):
+    worksheet = workbook.create_sheet("Top & Bottom Trades")
     worksheet.sheet_view.showGridLines = False
     worksheet.sheet_view.zoomScale = 80
 
-    max_section_columns = len(PERFORMANCE_HEADERS)
+    max_section_columns = len(TRADE_HEADERS)
     worksheet.merge_cells(
         start_row=1,
         start_column=1,
         end_row=1,
         end_column=max_section_columns,
     )
-    title = worksheet.cell(1, 1, "Trade Pattern Analysis: Entry Market Cap Below $75,000")
+    title = worksheet.cell(1, 1, "Top ROI Trades and Largest Realized Losses")
     title.fill = NAVY_FILL
     title.font = TITLE_FONT
     title.alignment = Alignment(horizontal="left", vertical="center")
@@ -553,187 +527,45 @@ def write_under_75_analysis(workbook, under_75_lots):
     note = worksheet.cell(
         2,
         1,
-        "Buy lots are classified by entry MC. Later sells are matched FIFO by trader and coin. "
-        "Realized comparisons use only the matched portion; open exposure is reported separately.",
+        "Rankings include all entry market caps. Open-only lots are excluded. Realized ROI and "
+        "P/L use only the portion matched to later sells through FIFO matching by trader and coin.",
     )
     note.fill = LIGHT_BLUE_FILL
     note.alignment = Alignment(wrap_text=True, vertical="center")
     worksheet.row_dimensions[2].height = 34
 
-    overall = summarize_lots(under_75_lots)
-    overview_metrics = [
-        ("Buy lots", overall["Buy Lots"], "integer"),
-        ("Lots with realized sales", overall["Realized Lots"], "integer"),
-        ("Profitable realized lots", overall["Profitable Lots"], "integer"),
-        ("Losing realized lots", overall["Losing Lots"], "integer"),
-        ("Win rate", overall["Win Rate"], "percent"),
-        ("Copy buy volume", overall["Copy Buy Volume"], "currency"),
-        ("Matched entry value", overall["Matched Entry Value"], "currency"),
-        ("Sale proceeds", overall["Sale Proceeds"], "currency"),
-        ("Total realized P/L", overall["Realized P/L"], "currency"),
-        ("Aggregate realized ROI", overall["Realized ROI"], "percent"),
-        ("Remaining entry value", overall["Remaining Entry Value"], "currency"),
-        ("Median lot ROI", overall["Median Lot ROI"], "percent"),
-    ]
+    realized_lots = [lot for lot in trade_lots if lot["Realized ROI"] is not None]
+    top_roi_trades = sorted(
+        realized_lots,
+        key=lambda lot: lot["Realized ROI"],
+        reverse=True,
+    )[:50]
+    largest_losses = sorted(
+        [lot for lot in realized_lots if lot["Realized P/L"] < -1e-9],
+        key=lambda lot: lot["Realized P/L"],
+    )[:50]
 
-    worksheet.merge_cells("A4:E4")
-    overview_title = worksheet["A4"]
-    overview_title.value = "Overview"
-    overview_title.fill = NAVY_FILL
-    overview_title.font = WHITE_FONT
-
-    for index, (label, value, value_type) in enumerate(overview_metrics):
-        block = 0 if index < 6 else 3
-        row_number = 5 + (index % 6)
-        label_cell = worksheet.cell(row_number, 1 + block, label)
-        value_cell = worksheet.cell(row_number, 2 + block, value)
-        label_cell.fill = LIGHT_GRAY_FILL
-        label_cell.font = Font(bold=True)
-        label_cell.border = THIN_GRAY_BORDER
-        value_cell.border = THIN_GRAY_BORDER
-        value_cell.alignment = Alignment(horizontal="right")
-        if value_type == "currency":
-            value_cell.number_format = CURRENCY_FORMAT
-        elif value_type == "percent":
-            value_cell.number_format = PERCENT_FORMAT
-        else:
-            value_cell.number_format = "#,##0"
-
-    current_row = 12
-    outcome_rows = []
-    for outcome in ["Profit", "Loss", "Breakeven"]:
-        selected = [
-            lot for lot in under_75_lots if lot["Realized Outcome"] == outcome
-        ]
-        if selected:
-            outcome_rows.append(performance_row(outcome, selected))
-    realized_lots = [
-        lot for lot in under_75_lots if lot["Realized ROI"] is not None
-    ]
-    if realized_lots:
-        outcome_rows.append(performance_row("All realized", realized_lots))
-    _, _, outcome_last = write_analysis_table(
+    _, top_first, top_last = write_analysis_table(
         worksheet,
-        current_row,
-        "Profit vs. Loss Comparison",
-        PERFORMANCE_HEADERS,
-        outcome_rows,
+        4,
+        "Top 50 Trades by Realized ROI",
+        TRADE_HEADERS,
+        top_roi_trades,
+    )
+    add_trade_conditional_formatting(
+        worksheet, TRADE_HEADERS, top_first, top_last
     )
 
-    current_row = outcome_last + 3
-    mc_band_order = ["<$25k", "$25k-$50k", "$50k-$75k"]
-    mc_rows = [
-        performance_row(
-            label,
-            [lot for lot in under_75_lots if lot["MC Band"] == label],
-        )
-        for label in mc_band_order
-        if any(lot["MC Band"] == label for lot in under_75_lots)
-    ]
-    _, _, mc_last = write_analysis_table(
+    _, loss_first, loss_last = write_analysis_table(
         worksheet,
-        current_row,
-        "Performance by Entry Market Cap",
-        PERFORMANCE_HEADERS,
-        mc_rows,
+        top_last + 3,
+        "Largest 50 Realized Losses by Dollar P/L",
+        TRADE_HEADERS,
+        largest_losses,
     )
-
-    current_row = mc_last + 3
-    size_rows = [
-        performance_row(
-            label,
-            [lot for lot in under_75_lots if lot["Buy Size Group"] == label],
-        )
-        for _, _, label in BUY_SIZE_BINS
-        if any(lot["Buy Size Group"] == label for lot in under_75_lots)
-    ]
-    _, _, size_last = write_analysis_table(
-        worksheet,
-        current_row,
-        "Performance by Original Buy Size",
-        PERFORMANCE_HEADERS,
-        size_rows,
+    add_trade_conditional_formatting(
+        worksheet, TRADE_HEADERS, loss_first, loss_last
     )
-
-    current_row = size_last + 3
-    traders = sorted({lot["Trader"] for lot in under_75_lots})
-    trader_rows = [
-        performance_row(
-            trader,
-            [lot for lot in under_75_lots if lot["Trader"] == trader],
-        )
-        for trader in traders
-    ]
-    trader_rows.sort(key=lambda row: row["Realized P/L"], reverse=True)
-    _, _, trader_last = write_analysis_table(
-        worksheet,
-        current_row,
-        "Performance by Trader",
-        PERFORMANCE_HEADERS,
-        trader_rows,
-    )
-
-    detail_headers = [
-        "Lot",
-        "Trader",
-        "Coin",
-        "Buy Time",
-        "Entry MC",
-        "MC Band",
-        "Buy Size Group",
-        "Original Buy",
-        "Copy Buy",
-        "Position Status",
-        "Realized Outcome",
-        "Sell Alerts",
-        "First Sell Time",
-        "Last Sell Time",
-        "Hours to First Sell",
-        "Hours to Last Sell",
-        "Average Exit MC",
-        "Matched Entry Value",
-        "Sale Proceeds",
-        "Realized P/L",
-        "Realized ROI",
-        "Remaining Entry Value",
-        "Open %",
-    ]
-    current_row = trader_last + 3
-    detail_header, detail_first, detail_last = write_analysis_table(
-        worksheet,
-        current_row,
-        "All Buy Lots Below $75k Entry MC",
-        detail_headers,
-        under_75_lots,
-    )
-
-    if under_75_lots:
-        worksheet.auto_filter.ref = (
-            f"A{detail_header}:{get_column_letter(len(detail_headers))}{detail_last}"
-        )
-        pnl_column = detail_headers.index("Realized P/L") + 1
-        roi_column = detail_headers.index("Realized ROI") + 1
-        for column_number in [pnl_column, roi_column]:
-            cell_range = (
-                f"{get_column_letter(column_number)}{detail_first}:"
-                f"{get_column_letter(column_number)}{detail_last}"
-            )
-            worksheet.conditional_formatting.add(
-                cell_range,
-                CellIsRule(
-                    operator="greaterThan",
-                    formula=["0"],
-                    fill=LIGHT_GREEN_FILL,
-                ),
-            )
-            worksheet.conditional_formatting.add(
-                cell_range,
-                CellIsRule(
-                    operator="lessThan",
-                    formula=["0"],
-                    fill=LIGHT_RED_FILL,
-                ),
-            )
 
     widths = {
         1: 28,
@@ -763,10 +595,10 @@ def write_under_75_analysis(workbook, under_75_lots):
     for column_number, width in widths.items():
         worksheet.column_dimensions[get_column_letter(column_number)].width = width
 
-    worksheet.freeze_panes = "A3"
+    worksheet.freeze_panes = "D6"
 
 
-def write_output(rows, under_75_lots, output_path: Path):
+def write_output(rows, trade_lots, output_path: Path):
     workbook = Workbook()
     worksheet = workbook.active
     worksheet.title = "MC x Buy Size"
@@ -805,20 +637,22 @@ def write_output(rows, under_75_lots, output_path: Path):
     for column_number, width in enumerate(widths, start=1):
         worksheet.column_dimensions[chr(64 + column_number)].width = width
 
+    if worksheet.max_row > 1:
+        worksheet.auto_filter.ref = f"A1:H{worksheet.max_row}"
     worksheet.freeze_panes = "A2"
-    write_under_75_analysis(workbook, under_75_lots)
+    write_ranked_trade_analysis(workbook, trade_lots)
     workbook.save(output_path)
 
 
 def main():
     args = parse_args()
     trades = read_trades(args.input, args.copy_ratio)
-    rows, under_75_lots = analyze(trades)
-    write_output(rows, under_75_lots, args.output)
+    rows, trade_lots = analyze(trades)
+    write_output(rows, trade_lots, args.output)
 
     print(f"Parsed {len(trades)} trades")
     print(f"Created {len(rows)} populated MC x buy-size groups")
-    print(f"Analyzed {len(under_75_lots)} buy lots below $75k entry MC")
+    print(f"Analyzed {len(trade_lots)} buy lots across all entry market caps")
     print(f"Saved: {args.output.resolve()}")
 
 
