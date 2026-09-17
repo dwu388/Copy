@@ -9,7 +9,7 @@ Optional output path:
 
 Output sheets:
 - MC x Buy Size: grouped performance sorted by realized ROI, with Excel filters.
-- Top & Bottom Trades: top 50 realized ROIs and largest 50 realized dollar losses.
+- Date Report: an interactive copy of the grouped report for user-selected buy dates.
 
 Assumptions:
 - Copy ratio defaults to 1:10, so a trader's $1,000 trade becomes a $100 copied trade.
@@ -29,7 +29,7 @@ from copy import copy
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
-from openpyxl.formatting.rule import CellIsRule
+from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -353,253 +353,175 @@ def analyze(trades):
 NAVY_FILL = PatternFill("solid", fgColor="17365D")
 BLUE_FILL = PatternFill("solid", fgColor="5B9BD5")
 LIGHT_BLUE_FILL = PatternFill("solid", fgColor="D9EAF7")
-LIGHT_GREEN_FILL = PatternFill("solid", fgColor="E2F0D9")
-LIGHT_RED_FILL = PatternFill("solid", fgColor="FCE4D6")
+INPUT_FILL = PatternFill("solid", fgColor="FFF2CC")
 WHITE_FONT = Font(color="FFFFFF", bold=True)
 TITLE_FONT = Font(color="FFFFFF", bold=True, size=16)
 THIN_GRAY_BORDER = Border(bottom=Side(style="thin", color="BFBFBF"))
 CURRENCY_FORMAT = '$#,##0.00;[Red]($#,##0.00);-'
-MC_FORMAT = '$#,##0;[Red]($#,##0);-'
 PERCENT_FORMAT = '0.0%;[Red](0.0%);-'
-NUMBER_FORMAT = '#,##0.00;[Red](#,##0.00);-'
 
 
-def format_cell_for_header(cell, header):
-    if header in {
-        "Entry MC",
-        "Average Exit MC",
-        "Average Entry MC",
-        "Median Entry MC",
-    }:
-        cell.number_format = MC_FORMAT
-    elif header in {
-        "Original Buy",
-        "Average Original Buy",
-        "Median Original Buy",
-        "Copy Buy",
-        "Copy Buy Volume",
-        "Matched Entry Value",
-        "Sale Proceeds",
-        "Realized P/L",
-        "Remaining Entry Value",
-    }:
-        cell.number_format = CURRENCY_FORMAT
-    elif header in {
-        "Win Rate",
-        "Realized ROI",
-        "Average Lot ROI",
-        "Median Lot ROI",
-        "Open %",
-    }:
-        cell.number_format = PERCENT_FORMAT
-    elif "Hours" in header:
-        cell.number_format = NUMBER_FORMAT
-    elif header.endswith("Time"):
-        cell.number_format = "yyyy-mm-dd hh:mm:ss"
-    elif header in {
-        "Lot",
-        "Buy Lots",
-        "Realized Lots",
-        "Profitable Lots",
-        "Losing Lots",
-        "Sell Alerts",
-    }:
-        cell.number_format = "#,##0"
-
-
-def write_analysis_table(worksheet, start_row, title, headers, data_rows):
-    end_column = len(headers)
-    worksheet.merge_cells(
-        start_row=start_row,
-        start_column=1,
-        end_row=start_row,
-        end_column=end_column,
+def write_date_report(workbook, trade_lots):
+    """Create a formula-driven report for any combination of selected buy dates."""
+    worksheet = workbook.create_sheet("Date Report")
+    data_sheet = workbook.create_sheet("Date Report Data")
+    data_sheet.append(
+        [
+            "Buy Date",
+            "Entry MC Group",
+            "Original Buy Size Group",
+            "Copy Buy",
+            "Matched Entry Value",
+            "Sale Proceeds",
+            "Remaining Entry Value",
+        ]
     )
-    title_cell = worksheet.cell(start_row, 1, title)
-    title_cell.fill = NAVY_FILL
-    title_cell.font = WHITE_FONT
-    title_cell.alignment = Alignment(horizontal="left")
 
-    header_row = start_row + 1
-    for column_number, header in enumerate(headers, start=1):
-        cell = worksheet.cell(header_row, column_number, header)
-        cell.fill = BLUE_FILL
-        cell.font = WHITE_FONT
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        cell.border = THIN_GRAY_BORDER
-
-    first_data_row = header_row + 1
-    for row_number, row_values in enumerate(data_rows, start=first_data_row):
-        for column_number, header in enumerate(headers, start=1):
-            cell = worksheet.cell(row_number, column_number, row_values.get(header))
-            cell.alignment = Alignment(
-                horizontal="left" if isinstance(cell.value, str) else "right",
-                vertical="center",
-            )
-            cell.border = THIN_GRAY_BORDER
-            format_cell_for_header(cell, header)
-
-    last_data_row = first_data_row + len(data_rows) - 1
-    return header_row, first_data_row, last_data_row
-
-
-TRADE_HEADERS = [
-    "Lot",
-    "Trader",
-    "Coin",
-    "Buy Time",
-    "Entry MC",
-    "Entry MC Group",
-    "Buy Size Group",
-    "Original Buy",
-    "Copy Buy",
-    "Position Status",
-    "Realized Outcome",
-    "Sell Alerts",
-    "First Sell Time",
-    "Last Sell Time",
-    "Hours to First Sell",
-    "Hours to Last Sell",
-    "Average Exit MC",
-    "Matched Entry Value",
-    "Sale Proceeds",
-    "Realized P/L",
-    "Realized ROI",
-    "Remaining Entry Value",
-    "Open %",
-]
-
-
-def add_trade_conditional_formatting(
-    worksheet, headers, first_data_row, last_data_row
-):
-    if first_data_row > last_data_row:
-        return
-
-    for header in ["Realized P/L", "Realized ROI"]:
-        column_number = headers.index(header) + 1
-        cell_range = (
-            f"{get_column_letter(column_number)}{first_data_row}:"
-            f"{get_column_letter(column_number)}{last_data_row}"
+    available_dates = sorted({lot["Buy Time"].date() for lot in trade_lots})
+    for lot in trade_lots:
+        data_sheet.append(
+            [
+                lot["Buy Time"].date(),
+                lot["Entry MC Group"],
+                lot["Buy Size Group"],
+                lot["Copy Buy"],
+                lot["Matched Entry Value"],
+                lot["Sale Proceeds"],
+                lot["Remaining Entry Value"],
+            ]
         )
-        worksheet.conditional_formatting.add(
-            cell_range,
-            CellIsRule(
-                operator="greaterThan",
-                formula=["0"],
-                fill=LIGHT_GREEN_FILL,
-            ),
-        )
-        worksheet.conditional_formatting.add(
-            cell_range,
-            CellIsRule(
-                operator="lessThan",
-                formula=["0"],
-                fill=LIGHT_RED_FILL,
-            ),
-        )
+    data_sheet.sheet_state = "hidden"
 
-
-def write_ranked_trade_analysis(workbook, trade_lots):
-    worksheet = workbook.create_sheet("Top & Bottom Trades")
     worksheet.sheet_view.showGridLines = False
-    worksheet.sheet_view.zoomScale = 80
-
-    max_section_columns = len(TRADE_HEADERS)
-    worksheet.merge_cells(
-        start_row=1,
-        start_column=1,
-        end_row=1,
-        end_column=max_section_columns,
-    )
-    title = worksheet.cell(1, 1, "Top ROI Trades and Largest Realized Losses")
+    worksheet.merge_cells("A1:H1")
+    title = worksheet["A1"]
+    title.value = "Interactive Report for Selected Buy Dates"
     title.fill = NAVY_FILL
     title.font = TITLE_FONT
     title.alignment = Alignment(horizontal="left", vertical="center")
     worksheet.row_dimensions[1].height = 26
 
-    worksheet.merge_cells(
-        start_row=2,
-        start_column=1,
-        end_row=2,
-        end_column=max_section_columns,
-    )
-    note = worksheet.cell(
-        2,
-        1,
-        "Rankings include all entry market caps. Open-only lots are excluded. Realized ROI and "
-        "P/L use only the portion matched to later sells through FIFO matching by trader and coin.",
+    worksheet.merge_cells("A2:H2")
+    note = worksheet["A2"]
+    note.value = (
+        "Choose up to 100 individual buy dates in the yellow cells. Duplicate dates are counted "
+        "once. The table recalculates when Excel opens or a selection changes."
     )
     note.fill = LIGHT_BLUE_FILL
     note.alignment = Alignment(wrap_text=True, vertical="center")
     worksheet.row_dimensions[2].height = 34
 
-    realized_lots = [lot for lot in trade_lots if lot["Realized ROI"] is not None]
-    top_roi_trades = sorted(
-        realized_lots,
-        key=lambda lot: lot["Realized ROI"],
-        reverse=True,
-    )[:50]
-    largest_losses = sorted(
-        [lot for lot in realized_lots if lot["Realized P/L"] < -1e-9],
-        key=lambda lot: lot["Realized P/L"],
-    )[:50]
+    for row in range(4, 14):
+        for column in range(1, 11):
+            cell = worksheet.cell(row, column)
+            cell.fill = INPUT_FILL
+            cell.number_format = "yyyy-mm-dd"
+            cell.alignment = Alignment(horizontal="center")
 
-    _, top_first, top_last = write_analysis_table(
-        worksheet,
-        4,
-        "Top 50 Trades by Realized ROI",
-        TRADE_HEADERS,
-        top_roi_trades,
-    )
-    add_trade_conditional_formatting(
-        worksheet, TRADE_HEADERS, top_first, top_last
-    )
+    # The dropdown source lives in a hidden column on the same sheet because Excel
+    # data validation cannot directly reference a range on another worksheet.
+    for row, value in enumerate(available_dates, start=2):
+        cell = worksheet.cell(row, 13, value)
+        cell.number_format = "yyyy-mm-dd"
+    worksheet.column_dimensions["M"].hidden = True
+    if available_dates:
+        validation = DataValidation(
+            type="list",
+            formula1=f"=$M$2:$M${len(available_dates) + 1}",
+            allow_blank=True,
+        )
+        validation.promptTitle = "Select a buy date"
+        validation.prompt = "Choose one available date. You may use any number of the yellow cells."
+        validation.errorTitle = "Date not in source data"
+        validation.error = "Select a date from the dropdown list."
+        validation.errorStyle = "stop"
+        validation.showErrorMessage = True
+        validation.showInputMessage = True
+        worksheet.add_data_validation(validation)
+        validation.add("A4:J13")
 
-    _, loss_first, loss_last = write_analysis_table(
-        worksheet,
-        top_last + 3,
-        "Largest 50 Realized Losses by Dollar P/L",
-        TRADE_HEADERS,
-        largest_losses,
-    )
-    add_trade_conditional_formatting(
-        worksheet, TRADE_HEADERS, loss_first, loss_last
-    )
+    headers = [
+        "Entry MC Group",
+        "Original Buy Size Group",
+        "Buy Alerts",
+        "1:10 Copy Buy Volume",
+        "Sale Proceeds",
+        "Realized P/L",
+        "Realized ROI",
+        "Open % of Buy Volume",
+    ]
+    header_row = 15
+    for column, header in enumerate(headers, start=1):
+        cell = worksheet.cell(header_row, column, header)
+        cell.fill = BLUE_FILL
+        cell.font = WHITE_FONT
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = THIN_GRAY_BORDER
 
-    widths = {
-        1: 28,
-        2: 20,
-        3: 15,
-        4: 21,
-        5: 15,
-        6: 15,
-        7: 18,
-        8: 16,
-        9: 17,
-        10: 18,
-        11: 18,
-        12: 13,
-        13: 21,
-        14: 21,
-        15: 19,
-        16: 18,
-        17: 17,
-        18: 20,
-        19: 17,
-        20: 16,
-        21: 15,
-        22: 21,
-        23: 14,
-    }
-    for column_number, width in widths.items():
+    data_last_row = len(trade_lots) + 1
+    output_row = header_row + 1
+    for _, _, mc_label in MC_BINS:
+        for _, _, size_label in BUY_SIZE_BINS:
+            worksheet.cell(output_row, 1, mc_label)
+            worksheet.cell(output_row, 2, size_label)
+
+            if trade_lots:
+                selected = (
+                    f"--('Date Report Data'!$B$2:$B${data_last_row}=$A{output_row}),"
+                    f"--('Date Report Data'!$C$2:$C${data_last_row}=$B{output_row}),"
+                    f"--(COUNTIF($A$4:$J$13,'Date Report Data'!$A$2:$A${data_last_row})>0)"
+                )
+                count_formula = f"SUMPRODUCT({selected})"
+
+                def selected_sum(column):
+                    return (
+                        f"SUMPRODUCT({selected},"
+                        f"'Date Report Data'!${column}$2:${column}${data_last_row})"
+                    )
+
+                copy_buy = selected_sum("D")
+                matched_entry = selected_sum("E")
+                sale_proceeds = selected_sum("F")
+                remaining_entry = selected_sum("G")
+                worksheet.cell(output_row, 3, f'=IF({count_formula}=0,"",{count_formula})')
+                worksheet.cell(output_row, 4, f'=IF(C{output_row}="","",{copy_buy})')
+                worksheet.cell(output_row, 5, f'=IF(C{output_row}="","",{sale_proceeds})')
+                worksheet.cell(
+                    output_row,
+                    6,
+                    f'=IF(C{output_row}="","",E{output_row}-{matched_entry})',
+                )
+                worksheet.cell(
+                    output_row,
+                    7,
+                    f'=IF(OR(C{output_row}="",{matched_entry}=0),"",F{output_row}/{matched_entry})',
+                )
+                worksheet.cell(
+                    output_row,
+                    8,
+                    f'=IF(OR(C{output_row}="",D{output_row}=0),"",{remaining_entry}/D{output_row})',
+                )
+
+            for column in range(1, 9):
+                cell = worksheet.cell(output_row, column)
+                cell.border = THIN_GRAY_BORDER
+            for column in (4, 5, 6):
+                worksheet.cell(output_row, column).number_format = CURRENCY_FORMAT
+            for column in (7, 8):
+                worksheet.cell(output_row, column).number_format = PERCENT_FORMAT
+            output_row += 1
+
+    widths = [18, 24, 12, 20, 16, 16, 14, 20]
+    for column_number, width in enumerate(widths, start=1):
         worksheet.column_dimensions[get_column_letter(column_number)].width = width
-
-    worksheet.freeze_panes = "D6"
+    worksheet.freeze_panes = "C16"
 
 
 def write_output(rows, trade_lots, output_path: Path):
     workbook = Workbook()
+    workbook.calculation.calcMode = "auto"
+    workbook.calculation.fullCalcOnLoad = True
+    workbook.calculation.forceFullCalc = True
     worksheet = workbook.active
     worksheet.title = "MC x Buy Size"
 
@@ -640,7 +562,7 @@ def write_output(rows, trade_lots, output_path: Path):
     if worksheet.max_row > 1:
         worksheet.auto_filter.ref = f"A1:H{worksheet.max_row}"
     worksheet.freeze_panes = "A2"
-    write_ranked_trade_analysis(workbook, trade_lots)
+    write_date_report(workbook, trade_lots)
     workbook.save(output_path)
 
 
@@ -652,7 +574,7 @@ def main():
 
     print(f"Parsed {len(trades)} trades")
     print(f"Created {len(rows)} populated MC x buy-size groups")
-    print(f"Analyzed {len(trade_lots)} buy lots across all entry market caps")
+    print(f"Added {len(trade_lots)} buy lots to the interactive date report")
     print(f"Saved: {args.output.resolve()}")
 
 
