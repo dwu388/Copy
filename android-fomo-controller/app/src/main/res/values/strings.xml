@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Fomo Controller</string>
+    <string name="notification_listener_label">Fomo Notification Listener</string>
+    <string name="accessibility_service_label">Fomo Controller Accessibility</string>
+</resources>
