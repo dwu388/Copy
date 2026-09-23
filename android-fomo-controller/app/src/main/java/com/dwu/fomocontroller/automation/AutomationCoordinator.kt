@@ -91,7 +91,7 @@ object AutomationCoordinator {
                     activeStage = "SELL_FIND_ENTRY"
                     db.updateState(key, activeStage)
                 } else {
-                    failLocked(key, "UI_ACTION_FAILED", "Unknown action \${event.action}")
+                    failLocked(key, "UI_ACTION_FAILED", "Unknown action ${event.action}")
                 }
                 deadline = now + STEP_TIMEOUT_MS
             }
@@ -143,7 +143,7 @@ object AutomationCoordinator {
 
     @Synchronized
     fun status(): String =
-        "stage=$activeStage active=\${activeKey ?: "none"} queued=\${queue.size}"
+        "stage=$activeStage active=${activeKey ?: "none"} queued=${queue.size}"
 
     @Synchronized
     fun pauseAndClearQueue() {
