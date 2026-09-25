@@ -29,7 +29,6 @@ class FomoNotificationListener : NotificationListenerService() {
     override fun onDestroy() {
         if (instance === this) instance = null
         io.shutdown()
-        db.close()
         super.onDestroy()
     }
 
