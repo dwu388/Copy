@@ -28,6 +28,9 @@ jobs:
         with:
           gradle-version: "9.6.0"
 
+      - name: Run unit tests
+        run: gradle testDebugUnitTest
+
       - name: Assemble debug APK
         run: gradle assembleDebug
 

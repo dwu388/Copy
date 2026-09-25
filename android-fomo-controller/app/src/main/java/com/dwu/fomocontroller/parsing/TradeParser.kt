@@ -9,8 +9,12 @@ data class ParsedTrade(
 )
 
 object TradeParser {
-    private val titleRegex = Regex("""^(.*?) at \$([\d,.]+)([kKmM]?) MC""")
-    private val tradeRegex = Regex("""@([^\s]+)\s+(bought|sold)\s+\$([\d,]+(?:\.\d+)?)""", RegexOption.IGNORE_CASE)
+    private val titleRegex = Regex("""^(.*?) at \$([\d,.]+)([kKmMbB]?) MC""", RegexOption.IGNORE_CASE)
+    private val tradeRegex = Regex(
+        """@([^\s]+)\s+(bought|sold)\s+\$([\d,]+(?:\.\d+)?)""",
+        RegexOption.IGNORE_CASE
+    )
+    private val actionRegex = Regex("""\b(bought|sold)\b""", RegexOption.IGNORE_CASE)
 
     fun parse(title: String, text: String): ParsedTrade {
         val titleMatch = titleRegex.find(title)
@@ -22,13 +26,14 @@ object TradeParser {
                 raw == null -> null
                 suffix == "k" -> raw * 1_000.0
                 suffix == "m" -> raw * 1_000_000.0
+                suffix == "b" -> raw * 1_000_000_000.0
                 else -> raw
             }
         }
 
         val tradeMatch = tradeRegex.find(text)
         val trader = tradeMatch?.groupValues?.getOrNull(1)
-        val action = tradeMatch?.groupValues?.getOrNull(2)?.lowercase()
+        val action = tradeMatch?.groupValues?.getOrNull(2)?.lowercase() ?: findAction(text)
         val amount = tradeMatch?.groupValues?.getOrNull(3)?.replace(",", "")?.toDoubleOrNull()
 
         return ParsedTrade(
@@ -40,12 +45,15 @@ object TradeParser {
         )
     }
 
+    fun findAction(text: String): String? =
+        actionRegex.find(text)?.groupValues?.getOrNull(1)?.lowercase()
+
     fun isThesisOnly(text: String): Boolean {
         val lower = text.lowercase()
         return Regex("""\bthesis\b""").containsMatchIn(lower) &&
-            !Regex("""\b(?:bought|sold)\b""").containsMatchIn(lower)
+            findAction(lower) == null
     }
 
     fun isTradeNotification(text: String): Boolean =
-        tradeRegex.containsMatchIn(text)
+        findAction(text) != null
 }

@@ -8,6 +8,7 @@ import com.dwu.fomocontroller.automation.AutomationCoordinator
 import com.dwu.fomocontroller.config.AppPreferences
 import com.dwu.fomocontroller.data.EventDatabase
 import com.dwu.fomocontroller.model.ControllerMode
+import com.dwu.fomocontroller.model.RecordedNotification
 import com.dwu.fomocontroller.model.TradeEvent
 import com.dwu.fomocontroller.parsing.TradeParser
 import java.util.concurrent.Executors
@@ -34,11 +35,23 @@ class FomoNotificationListener : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         if (sbn.packageName != FOMO_PACKAGE) return
 
-        val extras = sbn.notification.extras
+        val notification = sbn.notification
+        val extras = notification.extras
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
         val normalText = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
-        val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
-        val selectedText = if (!bigText.isNullOrBlank()) bigText else normalText
+        val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)
+            ?.toString()
+            ?.takeIf { it.isNotBlank() }
+        val textLines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+            ?.joinToString("\n") { it.toString() }
+            ?.takeIf { it.isNotBlank() }
+
+        val selectedText = when {
+            !bigText.isNullOrBlank() -> bigText
+            normalText.isNotBlank() -> normalText
+            !textLines.isNullOrBlank() -> textLines
+            else -> ""
+        }
 
         if (selectedText.isBlank()) return
 
@@ -50,10 +63,37 @@ class FomoNotificationListener : NotificationListenerService() {
             return
         }
 
-        if (!TradeParser.isTradeNotification(selectedText)) return
+        val action = TradeParser.findAction(selectedText) ?: return
+        val capturedTime = System.currentTimeMillis()
 
         io.execute {
             val parsed = TradeParser.parse(title, selectedText)
+
+            db.recordNotification(
+                RecordedNotification(
+                    notificationKey = sbn.key,
+                    notificationId = sbn.id,
+                    notificationTag = sbn.tag,
+                    packageName = sbn.packageName,
+                    postTime = sbn.postTime,
+                    capturedTime = capturedTime,
+                    title = title,
+                    normalText = normalText,
+                    bigText = bigText,
+                    selectedText = selectedText,
+                    action = action,
+                    trader = parsed.trader,
+                    coin = parsed.coin,
+                    marketCap = parsed.marketCap,
+                    sourceAmount = parsed.sourceAmount,
+                    channelId = notification.channelId,
+                    category = notification.category,
+                    groupKey = sbn.groupKey,
+                    hasContentIntent = notification.contentIntent != null,
+                    notificationActionCount = notification.actions?.size ?: 0
+                )
+            )
+
             val complete = parsed.action != null &&
                 parsed.trader != null &&
                 parsed.coin != null &&
@@ -84,7 +124,7 @@ class FomoNotificationListener : NotificationListenerService() {
                 notificationTag = sbn.tag,
                 packageName = sbn.packageName,
                 postTime = sbn.postTime,
-                capturedTime = System.currentTimeMillis(),
+                capturedTime = capturedTime,
                 title = title,
                 rawText = selectedText,
                 action = parsed.action,

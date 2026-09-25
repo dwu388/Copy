@@ -8,8 +8,8 @@ Prototype Android companion app for running the Fomo notification workflow mostl
 - Accepts only package \`family.fomo.app\`.
 - Prefers expanded notification text over regular notification text.
 - Parses \`bought\`, \`sold\`, and thesis-only notifications.
-- Stores bought/sold events locally before any UI automation.
-- Preserves Android notification key, ID, tag, post time, title, and selected text.
+- Appends every Fomo bought/sold notification to a raw local recorder before parsing, filtering, or UI automation.
+- Preserves Android notification key, ID, tag, post time, capture time, title, normal text, expanded text, selected text, channel/group/category metadata, content-intent presence, and action count.
 - Applies configurable market-cap, source-amount, and copy-ratio settings.
 - Opens the exact live notification by invoking its own \`contentIntent\`.
 - Uses an AccessibilityService to verify that the expected coin is visible after the notification opens.
@@ -31,6 +31,37 @@ The implementation keeps the important behavior of the current Tasker workflow:
 - important failures are preserved in the local event log.
 
 Unlike the existing Tasker-to-Sheets path, execution does not wait for an HTTP request. The local SQLite database is the durable first write.
+
+## Raw local buy/sell recorder
+
+The controller now keeps two different local views inside `fomo_controller.db`:
+
+- `recorded_notifications` is the append-only raw recorder. Every Fomo notification whose selected text contains the whole word `bought` or `sold` gets a new row before selection rules are applied.
+- `events` remains the controller state table. It is keyed by Android notification key because automation state for a live notification is updated over time.
+
+The raw recorder deliberately has no unique constraint on notification key. If Android/Fomo updates the same notification and the listener receives another qualifying callback, that callback is preserved as another raw row instead of replacing history.
+
+A raw row is retained even when optional parsing is incomplete, the event is outside configured market-cap/source-amount limits, or the controller stays in OBSERVE mode. This keeps trading decisions downstream from data capture.
+
+From the app dashboard, **Export raw buy/sell CSV** writes the complete recorder history to the app's Documents directory as:
+
+~~~text
+fomo_buy_sell_notifications.csv
+~~~
+
+Typical emulator path:
+
+~~~text
+/sdcard/Android/data/com.dwu.fomocontroller/files/Documents/fomo_buy_sell_notifications.csv
+~~~
+
+Pull it to Windows with:
+
+~~~bat
+adb pull /sdcard/Android/data/com.dwu.fomocontroller/files/Documents/fomo_buy_sell_notifications.csv .
+~~~
+
+The dashboard clear button is intentionally limited to the controller state log. It does not erase the append-only raw recorder.
 
 ## Requirements
 
