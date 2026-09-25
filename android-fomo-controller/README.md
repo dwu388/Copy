@@ -248,11 +248,21 @@ UI_ACTION_FAILED
 
 ## Build from command line
 
-This repository intentionally avoids committing a Gradle wrapper JAR. With Gradle 9.6 installed:
+The repository includes the Gradle 9.6 wrapper, including the wrapper JAR. A
+system-wide Gradle installation is not required.
+
+From the `android-fomo-controller` directory on Windows:
 
 ~~~bat
-gradle -p android-fomo-controller assembleDebug
+.\gradlew.bat --version
+.\gradlew.bat testDebugUnitTest
+.\gradlew.bat assembleDebug
 ~~~
+
+On macOS or Linux, use `./gradlew` instead.
+
+The wrapper pins Gradle 9.6.0 and verifies the downloaded binary distribution
+against Gradle's published SHA-256 checksum.
 
 The APK will be under:
 
@@ -260,7 +270,7 @@ The APK will be under:
 android-fomo-controller\app\build\outputs\apk\debug\
 ~~~
 
-Android Studio can also sync/build the project directly.
+Android Studio should also detect and use the committed wrapper automatically.
 
 ## Important limitations
 
