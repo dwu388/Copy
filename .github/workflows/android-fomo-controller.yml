@@ -3,7 +3,7 @@ name: Android Fomo Controller
 on:
   push:
     branches:
-      - feature/android-fomo-controller
+      - "feature/**"
   pull_request:
     paths:
       - "android-fomo-controller/**"

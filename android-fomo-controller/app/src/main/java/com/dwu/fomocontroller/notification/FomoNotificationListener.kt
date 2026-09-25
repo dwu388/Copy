@@ -11,6 +11,7 @@ import com.dwu.fomocontroller.model.ControllerMode
 import com.dwu.fomocontroller.model.RecordedNotification
 import com.dwu.fomocontroller.model.TradeEvent
 import com.dwu.fomocontroller.parsing.TradeParser
+import com.dwu.fomocontroller.strategy.AdaptiveHybridEngine
 import java.util.concurrent.Executors
 
 class FomoNotificationListener : NotificationListenerService() {
@@ -24,6 +25,7 @@ class FomoNotificationListener : NotificationListenerService() {
         db = EventDatabase(applicationContext)
         prefs = AppPreferences(applicationContext)
         AutomationCoordinator.initialize(applicationContext)
+        AdaptiveHybridEngine.initialize(applicationContext)
     }
 
     override fun onDestroy() {
@@ -113,10 +115,26 @@ class FomoNotificationListener : NotificationListenerService() {
 
             val marketCap = parsed.marketCap!!
             val sourceAmount = parsed.sourceAmount!!
-            val copyAmount = sourceAmount * prefs.copyRatio
-            val qualified =
-                marketCap < prefs.maxMarketCap &&
-                    sourceAmount < prefs.maxSourceAmount
+            val decision = runCatching {
+                AdaptiveHybridEngine.evaluate(
+                    notificationKey = sbn.key,
+                    action = parsed.action!!,
+                    trader = parsed.trader!!,
+                    token = parsed.coin!!,
+                    marketCap = marketCap,
+                    sourceAmount = sourceAmount,
+                    eventTimeMs = sbn.postTime,
+                    reserveForExecution = prefs.mode != ControllerMode.OBSERVE
+                )
+            }.getOrElse { error ->
+                db.upsert(
+                    baseEvent(
+                        sbn, title, selectedText, "MODEL_FAILED",
+                        parsed.action, parsed.trader, parsed.coin, marketCap, sourceAmount
+                    ).copy(failureReason = "Adaptive Hybrid v2 failed closed: ${error.message}")
+                )
+                return@execute
+            }
 
             val event = TradeEvent(
                 notificationKey = sbn.key,
@@ -132,13 +150,17 @@ class FomoNotificationListener : NotificationListenerService() {
                 coin = parsed.coin,
                 marketCap = marketCap,
                 sourceAmount = sourceAmount,
-                copyAmount = copyAmount,
-                state = if (qualified) "PARSED" else "FILTERED",
-                failureReason = if (qualified) null else "Outside configured market-cap/source-amount limits"
+                copyAmount = decision.copyAmount,
+                state = when {
+                    !decision.execute -> "FILTERED"
+                    prefs.mode == ControllerMode.OBSERVE -> "ADAPTIVE_OBSERVED"
+                    else -> "ADAPTIVE_SELECTED"
+                },
+                failureReason = decision.auditSummary()
             )
             db.upsert(event)
 
-            if (qualified && prefs.mode != ControllerMode.OBSERVE) {
+            if (decision.execute && prefs.mode != ControllerMode.OBSERVE) {
                 AutomationCoordinator.enqueue(event)
             }
         }

@@ -22,6 +22,7 @@ import com.dwu.fomocontroller.automation.FomoSelectors
 import com.dwu.fomocontroller.config.AppPreferences
 import com.dwu.fomocontroller.data.EventDatabase
 import com.dwu.fomocontroller.model.ControllerMode
+import com.dwu.fomocontroller.strategy.AdaptiveHybridEngine
 import java.io.File
 import java.text.DateFormat
 import java.util.Date
@@ -31,9 +32,7 @@ class MainActivity : Activity() {
     private lateinit var db: EventDatabase
 
     private lateinit var modeSpinner: Spinner
-    private lateinit var maxMcInput: EditText
-    private lateinit var maxAmountInput: EditText
-    private lateinit var copyRatioInput: EditText
+    private lateinit var feeSpinner: Spinner
     private lateinit var maxAgeInput: EditText
     private lateinit var statusView: TextView
     private lateinit var recorderView: TextView
@@ -45,6 +44,7 @@ class MainActivity : Activity() {
         prefs = AppPreferences(applicationContext)
         db = EventDatabase(applicationContext)
         AutomationCoordinator.initialize(applicationContext)
+        AdaptiveHybridEngine.initialize(applicationContext)
 
         setContentView(buildUi())
         loadSettingsIntoUi()
@@ -91,17 +91,15 @@ class MainActivity : Activity() {
         }
         root.addView(modeSpinner)
 
-        maxMcInput = numberInput()
-        root.addView(label("Maximum market cap"))
-        root.addView(maxMcInput)
-
-        maxAmountInput = numberInput()
-        root.addView(label("Maximum source notification amount"))
-        root.addView(maxAmountInput)
-
-        copyRatioInput = decimalInput()
-        root.addView(label("Copy ratio"))
-        root.addView(copyRatioInput)
+        root.addView(label("Adaptive Hybrid v2 fee schedule"))
+        feeSpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity,
+                android.R.layout.simple_spinner_dropdown_item,
+                listOf("Standard: max(\$0.95, 0.50%)", "10% code: max(\$0.855, 0.45%)")
+            )
+        }
+        root.addView(feeSpinner)
 
         maxAgeInput = numberInput()
         root.addView(label("Maximum event age (seconds)"))
@@ -131,6 +129,30 @@ class MainActivity : Activity() {
             setOnClickListener {
                 AutomationCoordinator.pauseAndClearQueue()
                 refreshStatus()
+            }
+        })
+
+        root.addView(Button(this).apply {
+            text = "Confirm latest prepared trade executed"
+            setOnClickListener {
+                Toast.makeText(
+                    this@MainActivity,
+                    AdaptiveHybridEngine.confirmLatestPrepared(),
+                    Toast.LENGTH_LONG
+                ).show()
+                refresh()
+            }
+        })
+
+        root.addView(Button(this).apply {
+            text = "Reject latest prepared trade"
+            setOnClickListener {
+                Toast.makeText(
+                    this@MainActivity,
+                    AdaptiveHybridEngine.rejectLatestPrepared(),
+                    Toast.LENGTH_LONG
+                ).show()
+                refresh()
             }
         })
 
@@ -194,36 +216,21 @@ class MainActivity : Activity() {
         inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
     }
 
-    private fun decimalInput() = EditText(this).apply {
-        inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-    }
-
     private fun loadSettingsIntoUi() {
         modeSpinner.setSelection(ControllerMode.entries.indexOf(prefs.mode))
-        maxMcInput.setText(prefs.maxMarketCap.toString())
-        maxAmountInput.setText(prefs.maxSourceAmount.toString())
-        copyRatioInput.setText(prefs.copyRatio.toString())
+        feeSpinner.setSelection(if (prefs.feeDiscount == 0.10) 1 else 0)
         maxAgeInput.setText(prefs.maxEventAgeSeconds.toString())
     }
 
     private fun saveSettings() {
-        val maxMc = maxMcInput.text.toString().toDoubleOrNull()
-        val maxAmount = maxAmountInput.text.toString().toDoubleOrNull()
-        val ratio = copyRatioInput.text.toString().toDoubleOrNull()
         val maxAge = maxAgeInput.text.toString().toLongOrNull()
 
-        if (maxMc == null || maxMc <= 0.0 ||
-            maxAmount == null || maxAmount <= 0.0 ||
-            ratio == null || ratio <= 0.0 ||
-            maxAge == null || maxAge <= 0L
-        ) {
-            Toast.makeText(this, "Enter positive numeric settings.", Toast.LENGTH_LONG).show()
+        if (maxAge == null || maxAge <= 0L) {
+            Toast.makeText(this, "Enter a positive maximum event age.", Toast.LENGTH_LONG).show()
             return
         }
 
-        prefs.maxMarketCap = maxMc
-        prefs.maxSourceAmount = maxAmount
-        prefs.copyRatio = ratio
+        prefs.feeDiscount = if (feeSpinner.selectedItemPosition == 1) 0.10 else 0.0
         prefs.maxEventAgeSeconds = maxAge
         Toast.makeText(this, "Settings saved.", Toast.LENGTH_SHORT).show()
         refreshStatus()
@@ -317,11 +324,31 @@ class MainActivity : Activity() {
     }
 
     private fun refreshStatus() {
+        val strategy = AdaptiveHybridEngine.status()
         statusView.text = buildString {
             append("Controller: ")
             append(AutomationCoordinator.status())
             append("\nMode: ")
             append(prefs.mode.name)
+            append("\nModel: ")
+            append(AdaptiveHybridEngine.modelDescription())
+            append("\nStrategy: mode=")
+            append(strategy.mode)
+            append(" stage=")
+            append(strategy.stageRatio)
+            append(" equity=$")
+            append("%.2f".format(java.util.Locale.US, strategy.equity))
+            append(" cash=$")
+            append("%.2f".format(java.util.Locale.US, strategy.cash))
+            append(" open=$")
+            append("%.2f".format(java.util.Locale.US, strategy.openCost))
+            append("\nPositions: ")
+            append(strategy.openPositions)
+            append("   Pending plans: ")
+            append(strategy.pendingPlans)
+            if (strategy.latestPreparedKey != null) {
+                append("\nA prepared trade awaits confirmation or rejection.")
+            }
             append("\nSelectors calibrated: ")
             append(FomoSelectors.calibrated)
             if (!FomoSelectors.calibrated) {

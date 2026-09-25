@@ -10,8 +10,8 @@ android {
         applicationId = "com.dwu.fomocontroller"
         minSdk = 28
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
     compileOptions {
@@ -24,9 +24,14 @@ android {
             isMinifyEnabled = false
         }
     }
+
+    sourceSets {
+        getByName("test").resources.srcDir("src/main/assets")
+    }
 }
 
 
 dependencies {
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20250517")
 }
