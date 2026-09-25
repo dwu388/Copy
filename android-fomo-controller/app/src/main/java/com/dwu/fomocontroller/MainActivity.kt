@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.graphics.Typeface
 import android.os.Bundle
+import android.os.Environment
 import android.provider.Settings
 import android.text.InputType
 import android.view.View
@@ -21,6 +22,7 @@ import com.dwu.fomocontroller.automation.FomoSelectors
 import com.dwu.fomocontroller.config.AppPreferences
 import com.dwu.fomocontroller.data.EventDatabase
 import com.dwu.fomocontroller.model.ControllerMode
+import java.io.File
 import java.text.DateFormat
 import java.util.Date
 
@@ -34,6 +36,7 @@ class MainActivity : Activity() {
     private lateinit var copyRatioInput: EditText
     private lateinit var maxAgeInput: EditText
     private lateinit var statusView: TextView
+    private lateinit var recorderView: TextView
     private lateinit var eventsView: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -133,9 +136,20 @@ class MainActivity : Activity() {
 
         statusView = TextView(this).apply {
             textSize = 15f
-            setPadding(0, 20, 0, 20)
+            setPadding(0, 20, 0, 12)
         }
         root.addView(statusView)
+
+        recorderView = TextView(this).apply {
+            textSize = 15f
+            setPadding(0, 8, 0, 12)
+        }
+        root.addView(recorderView)
+
+        root.addView(Button(this).apply {
+            text = "Export raw buy/sell CSV"
+            setOnClickListener { exportRawRecorder() }
+        })
 
         root.addView(Button(this).apply {
             text = "Refresh events"
@@ -143,7 +157,7 @@ class MainActivity : Activity() {
         })
 
         root.addView(Button(this).apply {
-            text = "Clear local event log"
+            text = "Clear controller state log"
             setOnClickListener {
                 db.clear()
                 refresh()
@@ -217,6 +231,7 @@ class MainActivity : Activity() {
 
     private fun refresh() {
         refreshStatus()
+        refreshRecorderStatus()
 
         val format = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM)
         val rows = db.recent(40)
@@ -251,6 +266,54 @@ class MainActivity : Activity() {
                 }
             }
         }
+    }
+
+    private fun refreshRecorderStatus() {
+        val stats = db.recorderStats()
+        val latest = stats.latestPostTime?.let {
+            DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM)
+                .format(Date(it))
+        } ?: "none yet"
+        recorderView.text = buildString {
+            append("Raw recorder: ")
+            append(stats.total)
+            append(" rows")
+            append("\nBuys: ")
+            append(stats.buys)
+            append("   Sells: ")
+            append(stats.sells)
+            append("\nLatest post: ")
+            append(latest)
+            append("\nDatabase: ")
+            append(getDatabasePath(EventDatabase.DB_NAME).absolutePath)
+        }
+    }
+
+    private fun exportRawRecorder() {
+        val directory = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
+            ?: File(filesDir, "exports")
+        val destination = File(directory, "fomo_buy_sell_notifications.csv")
+        Thread {
+            runCatching { db.exportRecordedCsv(destination) }
+                .onSuccess { rows ->
+                    runOnUiThread {
+                        Toast.makeText(
+                            this,
+                            "Exported $rows raw rows to ${destination.absolutePath}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+                .onFailure { error ->
+                    runOnUiThread {
+                        Toast.makeText(
+                            this,
+                            "Raw export failed: ${error.message}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+        }.start()
     }
 
     private fun refreshStatus() {
