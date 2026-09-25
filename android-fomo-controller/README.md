@@ -10,7 +10,11 @@ Prototype Android companion app for running the Fomo notification workflow mostl
 - Parses \`bought\`, \`sold\`, and thesis-only notifications.
 - Appends every Fomo bought/sold notification to a raw local recorder before parsing, filtering, or UI automation.
 - Preserves Android notification key, ID, tag, post time, capture time, title, normal text, expanded text, selected text, channel/group/category metadata, content-intent presence, and action count.
-- Applies configurable market-cap, source-amount, and copy-ratio settings.
+- Runs the fitted Adaptive Hybrid v2 classifier, ROI regressor, confidence rank,
+  fee gate, sizing ladder, and NORMAL/CAUTION/DEFENSIVE controller locally.
+- Keeps shadow outcomes for every model top-20% buy, including skipped copies.
+- Maintains a separate confirmed/paper position ledger and never routes an
+  unowned sell.
 - Opens the exact live notification by invoking its own \`contentIntent\`.
 - Uses an AccessibilityService to verify that the expected coin is visible after the notification opens.
 - Supports OBSERVE, DRY_RUN, and PREPARE modes.
@@ -41,7 +45,9 @@ The controller now keeps two different local views inside `fomo_controller.db`:
 
 The raw recorder deliberately has no unique constraint on notification key. If Android/Fomo updates the same notification and the listener receives another qualifying callback, that callback is preserved as another raw row instead of replacing history.
 
-A raw row is retained even when optional parsing is incomplete, the event is outside configured market-cap/source-amount limits, or the controller stays in OBSERVE mode. This keeps trading decisions downstream from data capture.
+A raw row is retained even when optional parsing is incomplete, Adaptive Hybrid
+v2 rejects the opportunity, or the controller stays in OBSERVE mode. This keeps
+trading decisions downstream from data capture.
 
 From the app dashboard, **Export raw buy/sell CSV** writes the complete recorder history to the app's Documents directory as:
 
@@ -103,19 +109,19 @@ Or use GitHub's Download ZIP option while viewing the \`feature/android-fomo-con
 
 On some Android versions a sideloaded app's accessibility toggle can be blocked by "Restricted settings". If that happens, open the app's Android App Info screen, allow restricted settings, then return to Accessibility.
 
-## Default selection settings
+## Adaptive Hybrid v2 defaults
 
-The first launch defaults are:
+The embedded model is the selected `mild` v2 bundle trained through
+`2026-09-22 21:09:30.822000`. Its inputs are trader, log entry market cap, and
+log source buy amount. `DuckSoldier` is excluded by the fitted bundle.
 
-- maximum market cap: 50000
-- maximum source notification amount: 1000
-- copy ratio: 0.10
-- maximum event age: 120 seconds
-- mode: OBSERVE
+The first launch uses the standard fee schedule
+`max($0.95, 0.50% × order)` and OBSERVE mode. The dashboard can select the
+validated 10%-code schedule `max($0.855, 0.45% × order)` and can change the
+120-second maximum event age. Strategy thresholds and sizing are versioned with
+the model asset rather than exposed as ad hoc dashboard overrides.
 
-They are editable from the emulator dashboard.
-
-These thresholds currently apply to both bought and sold notifications in this prototype.
+See `docs/ADAPTIVE_HYBRID_V2.md` for the complete controller specification.
 
 ## Selector calibration
 
@@ -151,7 +157,8 @@ See \`docs/CALIBRATION.md\`.
 
 ### OBSERVE
 
-Captures, parses, filters, and logs. It does not open Fomo.
+Captures, parses, scores, updates shadow outcomes, and logs. It does not reserve
+capital, create copied positions, or open Fomo.
 
 ### DRY_RUN
 
@@ -162,7 +169,8 @@ For a qualifying event:
 3. waits for Fomo;
 4. verifies the parsed coin is visible;
 5. records \`DRY_RUN_VERIFIED\`;
-6. performs no Buy/Sell click.
+6. records the selected action in the paper ledger;
+7. performs no Buy/Sell click.
 
 This is the recommended validation mode.
 
@@ -179,6 +187,12 @@ For a qualifying event it:
 5. stops and records \`PREPARED_BUY\` or \`PREPARED_SELL\`.
 
 It does **not** press a final review, confirm, swap, submit, or transaction control.
+
+After manually completing the prepared action in Fomo, use **Confirm latest
+prepared trade executed**. If it was not completed, use **Reject latest prepared
+trade**. Until one of those actions is chosen, its capital stays reserved. This
+prevents later notifications from spending the same cash or selling a position
+that was never acquired.
 
 ## Running without taking over Windows
 
@@ -253,5 +267,9 @@ Android Studio can also sync/build the project directly.
 - Fomo's actual accessibility hierarchy has not been observed from your emulator yet, so its resource IDs cannot be safely pre-filled.
 - PREPARE therefore remains locked until you calibrate those IDs.
 - The prototype does not infer whether a final on-chain/app transaction actually completed.
-- It does not maintain an authoritative copied-token balance.
+- PREPARE therefore requires explicit confirmation or rejection from the dashboard.
+- The ledger estimates position value from the source notification's market-cap
+  ratio. It is not an on-chain balance or fill-price reconciliation.
+- Source data identifies tokens by ticker, not mint/contract. Same-ticker
+  collisions remain a known risk and fail-safe automation still requires mint capture.
 - It intentionally does not implement unattended final transaction submission.

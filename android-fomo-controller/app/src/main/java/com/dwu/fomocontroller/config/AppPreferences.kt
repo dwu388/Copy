@@ -25,4 +25,13 @@ class AppPreferences(context: Context) {
     var maxEventAgeSeconds: Long
         get() = prefs.getLong("maxEventAgeSeconds", 120L)
         set(value) = prefs.edit().putLong("maxEventAgeSeconds", value).apply()
+
+    /** 0.0 for standard fees or 0.10 for the validated 10% code schedule. */
+    var feeDiscount: Double
+        get() = prefs.getString("feeDiscount", "0.0")?.toDoubleOrNull()
+            ?.takeIf { it == 0.0 || it == 0.10 } ?: 0.0
+        set(value) {
+            require(value == 0.0 || value == 0.10)
+            prefs.edit().putString("feeDiscount", value.toString()).apply()
+        }
 }

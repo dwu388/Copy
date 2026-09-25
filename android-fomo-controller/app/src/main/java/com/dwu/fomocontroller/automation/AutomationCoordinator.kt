@@ -9,6 +9,7 @@ import com.dwu.fomocontroller.data.EventDatabase
 import com.dwu.fomocontroller.model.ControllerMode
 import com.dwu.fomocontroller.model.TradeEvent
 import com.dwu.fomocontroller.notification.FomoNotificationListener
+import com.dwu.fomocontroller.strategy.AdaptiveHybridEngine
 import java.util.ArrayDeque
 
 object AutomationCoordinator {
@@ -31,6 +32,7 @@ object AutomationCoordinator {
         if (initialized) return
         db = EventDatabase(context.applicationContext)
         prefs = AppPreferences(context.applicationContext)
+        AdaptiveHybridEngine.initialize(context.applicationContext)
         initialized = true
     }
 
@@ -66,6 +68,11 @@ object AutomationCoordinator {
                 if (!AccessibilityTools.containsText(root, expectedCoin)) return
 
                 if (prefs.mode == ControllerMode.DRY_RUN) {
+                    val ledgerResult = AdaptiveHybridEngine.recordPaperExecution(key)
+                    if (!ledgerResult.startsWith("Recorded ")) {
+                        failLocked(key, "PAPER_LEDGER_FAILED", ledgerResult)
+                        return
+                    }
                     finishLocked(key, "DRY_RUN_VERIFIED")
                     return
                 }
@@ -133,10 +140,8 @@ object AutomationCoordinator {
                     return
                 }
 
-                finishLocked(
-                    key,
-                    if (activeStage == "BUY_FILL_AMOUNT") "PREPARED_BUY" else "PREPARED_SELL"
-                )
+                AdaptiveHybridEngine.markPrepared(key)
+                finishLocked(key, if (activeStage == "BUY_FILL_AMOUNT") "PREPARED_BUY" else "PREPARED_SELL")
             }
         }
     }
@@ -147,6 +152,8 @@ object AutomationCoordinator {
 
     @Synchronized
     fun pauseAndClearQueue() {
+        activeKey?.let(AdaptiveHybridEngine::cancelUnexecuted)
+        queue.forEach(AdaptiveHybridEngine::cancelUnexecuted)
         queue.clear()
         activeKey = null
         activeStage = "IDLE"
@@ -167,6 +174,7 @@ object AutomationCoordinator {
         val ageMs = System.currentTimeMillis() - event.postTime
         if (ageMs > prefs.maxEventAgeSeconds * 1000L) {
             db.updateState(key, "EXPIRED", "Event exceeded configured max age")
+            AdaptiveHybridEngine.cancelUnexecuted(key)
             handler.post { synchronized(this) { startNextLocked() } }
             return
         }
@@ -198,6 +206,7 @@ object AutomationCoordinator {
     @Synchronized
     private fun failLocked(key: String, state: String, reason: String) {
         db.updateState(key, state, reason)
+        AdaptiveHybridEngine.cancelUnexecuted(key)
         activeKey = null
         activeStage = "IDLE"
         deadline = 0L

@@ -48,25 +48,25 @@ marketCap
 sourceAmount
 ~~~
 
-The configured copy ratio derives:
-
-~~~text
-copyAmount = sourceAmount * copyRatio
-~~~
+Bought notifications are passed to the embedded Adaptive Hybrid v2 model. The
+model produces profitable-exit probability, predicted ROI, and a confidence
+percentile from its frozen training reference.
 
 ## Selection
 
-Current prototype qualification:
+Buy selection then applies the active regime's confidence threshold, fee/EV
+gate, cash reserve, total exposure, trader concentration, token concentration,
+and 15-minute burst concentration. It searches progressively safer copy ratios
+if the intended ratio does not fit.
 
-~~~text
-marketCap < maxMarketCap
-AND
-sourceAmount < maxSourceAmount
-~~~
+Sells do not pass through the buy model. A sell is eligible only when the
+strategy ledger contains a confirmed or paper position for the same trader and
+token. The first later matching sell exits all matched copied lots, which is the
+rule used to train and validate the model.
 
-This is applied to both bought and sold notifications in v0.1.
-
-That is intentionally simple and should be reviewed before using PREPARE for exits. A future version should keep an authoritative local copied-position ledger and route sells based on actually acquired position quantity.
+Exact duplicate action/trader/token/market-cap/source-amount notifications
+within three minutes are ignored by the strategy layer but remain preserved in
+the append-only raw recorder.
 
 ## Exact notification opening
 
@@ -111,7 +111,10 @@ VERIFYING
       PREPARED_SELL
 ~~~
 
-Every job is immutable in the database and the coordinator runs one job at a time.
+The coordinator runs one job at a time. Plans reserve cash and exposure before
+UI work. DRY_RUN commits them to a paper ledger after page verification.
+PREPARE leaves them reserved until the user confirms or rejects the completed
+action from the dashboard.
 
 ## Failure behavior
 
