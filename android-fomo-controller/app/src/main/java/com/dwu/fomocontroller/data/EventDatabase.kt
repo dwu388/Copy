@@ -8,6 +8,7 @@ import android.database.sqlite.SQLiteOpenHelper
 import com.dwu.fomocontroller.model.RecordedNotification
 import com.dwu.fomocontroller.model.RecorderStats
 import com.dwu.fomocontroller.model.TradeEvent
+import com.dwu.fomocontroller.notification.NotificationClearPolicy
 import java.io.File
 
 class EventDatabase(context: Context) :
@@ -205,6 +206,30 @@ class EventDatabase(context: Context) :
             }
         }
         return rows
+    }
+
+    fun isSafeToClearNotification(key: String): Boolean {
+        readableDatabase.rawQuery(
+            """
+            SELECT
+                e.state,
+                EXISTS(
+                    SELECT 1
+                    FROM recorded_notifications r
+                    WHERE r.notification_key = e.notification_key
+                )
+            FROM events e
+            WHERE e.notification_key = ?
+            LIMIT 1
+            """.trimIndent(),
+            arrayOf(key)
+        ).use { cursor ->
+            if (!cursor.moveToFirst()) return false
+            return NotificationClearPolicy.isSafeToClear(
+                state = cursor.getString(0),
+                rawTradeRecorded = cursor.getInt(1) != 0
+            )
+        }
     }
 
     fun upsert(event: TradeEvent) {
