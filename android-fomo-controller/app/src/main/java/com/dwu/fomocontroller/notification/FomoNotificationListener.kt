@@ -13,9 +13,11 @@ import com.dwu.fomocontroller.model.TradeEvent
 import com.dwu.fomocontroller.parsing.TradeParser
 import com.dwu.fomocontroller.strategy.AdaptiveHybridEngine
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class FomoNotificationListener : NotificationListenerService() {
     private val io = Executors.newSingleThreadExecutor()
+    private val cleanup = Executors.newSingleThreadScheduledExecutor()
     private lateinit var db: EventDatabase
     private lateinit var prefs: AppPreferences
 
@@ -26,10 +28,22 @@ class FomoNotificationListener : NotificationListenerService() {
         prefs = AppPreferences(applicationContext)
         AutomationCoordinator.initialize(applicationContext)
         AdaptiveHybridEngine.initialize(applicationContext)
+        cleanup.scheduleWithFixedDelay(
+            ::clearHandledNotifications,
+            CLEANUP_INTERVAL_MINUTES,
+            CLEANUP_INTERVAL_MINUTES,
+            TimeUnit.MINUTES
+        )
+    }
+
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        cleanup.execute(::clearHandledNotifications)
     }
 
     override fun onDestroy() {
         if (instance === this) instance = null
+        cleanup.shutdownNow()
         io.shutdown()
         super.onDestroy()
     }
@@ -166,6 +180,14 @@ class FomoNotificationListener : NotificationListenerService() {
         }
     }
 
+    private fun clearHandledNotifications() {
+        val active = runCatching { activeNotifications.toList() }.getOrElse { return }
+        active.asSequence()
+            .filter { it.packageName == FOMO_PACKAGE }
+            .filter { db.isSafeToClearNotification(it.key) }
+            .forEach { cancelNotification(it.key) }
+    }
+
     private fun baseEvent(
         sbn: StatusBarNotification,
         title: String,
@@ -196,6 +218,7 @@ class FomoNotificationListener : NotificationListenerService() {
 
     companion object {
         private const val FOMO_PACKAGE = "family.fomo.app"
+        private const val CLEANUP_INTERVAL_MINUTES = 3L
 
         @Volatile private var instance: FomoNotificationListener? = null
 

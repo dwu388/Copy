@@ -30,11 +30,16 @@ The implementation keeps the important behavior of the current Tasker workflow:
 - non-Fomo packages are ignored;
 - expanded text wins when present;
 - bought and sold notifications are parsed;
-- thesis-only notifications are cleared;
+- thesis-only notifications are cleared immediately;
+- safely handled bought/sold notifications are cleared by a three-minute active-notification sweep;
+- bought/sold notifications are cleared only when a matching raw recorder row exists;
+- parse, model, opening, UI, timeout, and other failure states stay visible;
 - unrelated Fomo notifications are left alone;
 - important failures are preserved in the local event log.
 
 Unlike the existing Tasker-to-Sheets path, execution does not wait for an HTTP request. The local SQLite database is the durable first write.
+
+The notification listener also performs a fail-closed cleanup sweep when it connects and every three minutes afterward. It checks only active notifications from `family.fomo.app` and clears a bought/sold notification only when the database proves that the raw capture succeeded and controller processing reached `FILTERED`, `ADAPTIVE_OBSERVED`, `OBSERVED`, `DRY_RUN_VERIFIED`, `PREPARED_BUY`, or `PREPARED_SELL`. In-flight, expired, and failed events are retained for inspection.
 
 ## Raw local buy/sell recorder
 
