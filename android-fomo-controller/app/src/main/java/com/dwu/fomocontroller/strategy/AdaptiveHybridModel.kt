@@ -118,17 +118,29 @@ class AdaptiveHybridModel private constructor(
     }
 
     companion object {
-        private const val ASSET = "adaptive_hybrid_v2.json.gz"
+        // AAPT removes the .gz suffix from gzip-compressed assets in the APK.
+        // The repository/source fixture remains .json.gz and is loaded with
+        // fromGzip() by JVM tests; Android's AssetManager exposes the packaged
+        // file as adaptive_hybrid_v2.json and transparently decompresses it.
+        private const val ASSET = "adaptive_hybrid_v2.json"
 
-        fun fromAssets(context: Context): AdaptiveHybridModel =
-            context.assets.open(ASSET).use(::fromGzip)
+        fun fromAssets(context: Context): AdaptiveHybridModel {
+            val root = context.assets.open(ASSET).bufferedReader(Charsets.UTF_8).use { reader ->
+                JSONObject(reader.readText())
+            }
+            return fromJson(root)
+        }
 
         fun fromGzip(input: InputStream): AdaptiveHybridModel {
             val root = GZIPInputStream(input).bufferedReader(Charsets.UTF_8).use { reader ->
                 JSONObject(reader.readText())
             }
+            return fromJson(root)
+        }
+
+        private fun fromJson(root: JSONObject): AdaptiveHybridModel {
             require(root.getString("version") == "adaptive_hybrid_v2") {
-                "Unsupported strategy model ${root.optString("version")}" 
+                "Unsupported strategy model ${root.optString("version")}"
             }
             return AdaptiveHybridModel(
                 version = root.getString("version"),
