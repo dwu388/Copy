@@ -601,9 +601,14 @@ class StrategyDatabase(context: Context) :
     }
 
     fun cancelOrphanedPlanned(db: SQLiteDatabase) {
+        val orphaned = mutableListOf<Pair<String, String>>()
+        db.rawQuery("SELECT notification_key,action FROM plans WHERE status='PLANNED'", null).use {
+            while (it.moveToNext()) orphaned += it.getString(0) to it.getString(1)
+        }
+        val now = System.currentTimeMillis()
         val values = ContentValues().apply {
             put("status", "CANCELLED_AFTER_RESTART")
-            put("updated_time", System.currentTimeMillis())
+            put("updated_time", now)
         }
         db.update("plans", values, "status='PLANNED'", null)
         db.update(
@@ -612,6 +617,9 @@ class StrategyDatabase(context: Context) :
             "execution_status='PLANNED'",
             null
         )
+        for ((key, action) in orphaned) {
+            recordExecutionEvent(db, key, action, "CANCELLED_AFTER_RESTART", now)
+        }
     }
 
     fun latestPrepared(db: SQLiteDatabase): StrategyPlan? = db.rawQuery(
