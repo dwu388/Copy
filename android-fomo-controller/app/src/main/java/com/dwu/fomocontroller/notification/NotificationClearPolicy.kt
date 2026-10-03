@@ -1,24 +1,21 @@
 package com.dwu.fomocontroller.notification
 
 /**
- * Fail-closed policy for removing Fomo notifications from Android's active tray.
+ * Buy/sell notifications stay live only while their exact content intent may
+ * still be needed. Every trade requires a durable raw-recorder row before it
+ * can be cleared. Missing controller-state rows are safe after durable capture,
+ * so clearing the dashboard event log cannot strand notifications.
  *
- * Bought/sold notifications require both a durable raw-recorder row and a
- * terminal successful controller state. Thesis-only notifications are recorded
- * directly in the controller event table and can be cleared without a raw
- * buy/sell row.
+ * Non-trade Fomo notifications are handled directly by the listener and do not
+ * use this policy.
  */
 object NotificationClearPolicy {
-    private val handledTradeStates = setOf(
-        "FILTERED",
-        "ADAPTIVE_OBSERVED",
-        "OBSERVED",
-        "DRY_RUN_VERIFIED",
-        "PREPARED_BUY",
-        "PREPARED_SELL"
+    private val notificationStillNeededStates = setOf(
+        "ADAPTIVE_SELECTED",
+        "QUEUED",
+        "OPENING"
     )
 
     fun isSafeToClear(state: String?, rawTradeRecorded: Boolean): Boolean =
-        state == "THESIS_IGNORED" ||
-            (rawTradeRecorded && state in handledTradeStates)
+        rawTradeRecorded && state !in notificationStillNeededStates
 }
