@@ -208,26 +208,44 @@ class EventDatabase(context: Context) :
         return rows
     }
 
+    fun hasRecordedNotification(key: String): Boolean {
+        readableDatabase.rawQuery(
+            """
+            SELECT EXISTS(
+                SELECT 1
+                FROM recorded_notifications
+                WHERE notification_key = ?
+            )
+            """.trimIndent(),
+            arrayOf(key)
+        ).use { cursor ->
+            cursor.moveToFirst()
+            return cursor.getInt(0) != 0
+        }
+    }
+
     fun isSafeToClearNotification(key: String): Boolean {
         readableDatabase.rawQuery(
             """
             SELECT
-                e.state,
                 EXISTS(
                     SELECT 1
-                    FROM recorded_notifications r
-                    WHERE r.notification_key = e.notification_key
+                    FROM recorded_notifications
+                    WHERE notification_key = ?
+                ),
+                (
+                    SELECT state
+                    FROM events
+                    WHERE notification_key = ?
+                    LIMIT 1
                 )
-            FROM events e
-            WHERE e.notification_key = ?
-            LIMIT 1
             """.trimIndent(),
-            arrayOf(key)
+            arrayOf(key, key)
         ).use { cursor ->
-            if (!cursor.moveToFirst()) return false
+            cursor.moveToFirst()
             return NotificationClearPolicy.isSafeToClear(
-                state = cursor.getString(0),
-                rawTradeRecorded = cursor.getInt(1) != 0
+                state = if (cursor.isNull(1)) null else cursor.getString(1),
+                rawTradeRecorded = cursor.getInt(0) != 0
             )
         }
     }

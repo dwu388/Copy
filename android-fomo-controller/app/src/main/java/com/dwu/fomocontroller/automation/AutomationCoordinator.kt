@@ -152,8 +152,16 @@ object AutomationCoordinator {
 
     @Synchronized
     fun pauseAndClearQueue() {
-        activeKey?.let(AdaptiveHybridEngine::cancelUnexecuted)
-        queue.forEach(AdaptiveHybridEngine::cancelUnexecuted)
+        activeKey?.let { key ->
+            AdaptiveHybridEngine.cancelUnexecuted(key)
+            db.updateState(key, "AUTOMATION_CANCELED", "Automation queue was cleared")
+            FomoNotificationListener.clearExactNotification(key)
+        }
+        queue.forEach { key ->
+            AdaptiveHybridEngine.cancelUnexecuted(key)
+            db.updateState(key, "AUTOMATION_CANCELED", "Automation queue was cleared")
+            FomoNotificationListener.clearExactNotification(key)
+        }
         queue.clear()
         activeKey = null
         activeStage = "IDLE"
@@ -175,6 +183,7 @@ object AutomationCoordinator {
         if (ageMs > prefs.maxEventAgeSeconds * 1000L) {
             db.updateState(key, "EXPIRED", "Event exceeded configured max age")
             AdaptiveHybridEngine.cancelUnexecuted(key)
+            FomoNotificationListener.clearExactNotification(key)
             handler.post { synchronized(this) { startNextLocked() } }
             return
         }
@@ -207,6 +216,7 @@ object AutomationCoordinator {
     private fun failLocked(key: String, state: String, reason: String) {
         db.updateState(key, state, reason)
         AdaptiveHybridEngine.cancelUnexecuted(key)
+        FomoNotificationListener.clearExactNotification(key)
         activeKey = null
         activeStage = "IDLE"
         deadline = 0L
