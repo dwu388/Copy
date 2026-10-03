@@ -30,16 +30,15 @@ The implementation keeps the important behavior of the current Tasker workflow:
 - non-Fomo packages are ignored;
 - expanded text wins when present;
 - bought and sold notifications are parsed;
-- thesis-only notifications are cleared immediately;
-- safely handled bought/sold notifications are cleared by a three-minute active-notification sweep;
-- bought/sold notifications are cleared only when a matching raw recorder row exists;
-- parse, model, opening, UI, timeout, and other failure states stay visible;
-- unrelated Fomo notifications are left alone;
-- important failures are preserved in the local event log.
+- every non-trade Fomo notification is cleared immediately, including blank, thesis-only, group-summary, and unrelated notifications;
+- bought/sold notifications are cleared only after a matching raw recorder row confirms durable capture;
+- selected trades stay live only through the step that invokes their exact content intent, then clear immediately;
+- parse, model, expiration, opening, UI, timeout, and other failures remain preserved in the local event log but no longer accumulate in the Android tray;
+- the three-minute active-notification sweep is an exception-safe retry path rather than the primary clearing mechanism.
 
 Unlike the existing Tasker-to-Sheets path, execution does not wait for an HTTP request. The local SQLite database is the durable first write.
 
-The notification listener also performs a fail-closed cleanup sweep when it connects and every three minutes afterward. It checks only active notifications from `family.fomo.app` and clears a bought/sold notification only when the database proves that the raw capture succeeded and controller processing reached `FILTERED`, `ADAPTIVE_OBSERVED`, `OBSERVED`, `DRY_RUN_VERIFIED`, `PREPARED_BUY`, or `PREPARED_SELL`. In-flight, expired, and failed events are retained for inspection.
+The listener clears non-trade Fomo notifications as soon as they arrive. For bought/sold notifications, a successful insert into `recorded_notifications` is the durable-read confirmation. Notifications rejected by parsing or the model, filtered trades, OBSERVE-mode trades, expired work, and terminal automation failures clear immediately after that confirmation. A selected trade remains active only while its exact notification `contentIntent` is still needed; it is cleared immediately after the intent is invoked. The listener also runs an exception-safe recovery sweep when it connects and every three minutes afterward.
 
 ## Raw local buy/sell recorder
 
@@ -91,7 +90,7 @@ The project uses Android Gradle Plugin 9.4.0. Google documents Gradle 9.6.0 and 
 Clone only this branch:
 
 ~~~bat
-git clone --branch feature/android-fomo-controller --single-branch https://github.com/dwu388/Copy.git
+git clone --branch main --single-branch https://github.com/dwu388/Copy.git
 cd Copy\android-fomo-controller
 ~~~
 
