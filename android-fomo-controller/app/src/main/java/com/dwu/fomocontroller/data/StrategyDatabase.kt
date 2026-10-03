@@ -6,6 +6,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import com.dwu.fomocontroller.strategy.RecentEntry
 import com.dwu.fomocontroller.strategy.RuntimeSnapshot
+import java.io.File
 
 data class StrategyPlan(
     val notificationKey: String,
@@ -131,11 +132,14 @@ class StrategyDatabase(context: Context) :
                 fee REAL,
                 reserve_required REAL,
                 created_time INTEGER NOT NULL,
-                execution_status TEXT NOT NULL
+                execution_status TEXT NOT NULL,
+                forecast_model_id TEXT NOT NULL DEFAULT 'adaptive_hybrid_v2',
+                policy_model_id TEXT NOT NULL DEFAULT 'adaptive_hybrid_v2:mild'
             )
             """.trimIndent()
         )
         db.execSQL("CREATE INDEX idx_decisions_time ON decisions(created_time)")
+        createLearningTables(db)
         db.execSQL(
             """
             CREATE TABLE plans (
@@ -183,7 +187,75 @@ class StrategyDatabase(context: Context) :
         )
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) {
+            db.execSQL(
+                "ALTER TABLE decisions ADD COLUMN forecast_model_id TEXT NOT NULL " +
+                    "DEFAULT 'adaptive_hybrid_v2'"
+            )
+            db.execSQL(
+                "ALTER TABLE decisions ADD COLUMN policy_model_id TEXT NOT NULL " +
+                    "DEFAULT 'adaptive_hybrid_v2:mild'"
+            )
+            createLearningTables(db)
+        }
+    }
+
+    private fun createLearningTables(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS learning_opportunities (
+                opportunity_id TEXT PRIMARY KEY,
+                buy_notification_key TEXT NOT NULL,
+                trader TEXT NOT NULL,
+                token TEXT NOT NULL,
+                entry_market_cap REAL NOT NULL,
+                source_buy_usd REAL NOT NULL,
+                entry_time INTEGER NOT NULL,
+                forecast_model_id TEXT NOT NULL,
+                policy_model_id TEXT NOT NULL,
+                predicted_probability REAL,
+                predicted_roi REAL,
+                confidence_rank REAL,
+                exit_notification_key TEXT,
+                exit_market_cap REAL,
+                exit_time INTEGER,
+                realized_source_roi REAL,
+                profitable INTEGER,
+                lifecycle_group_id TEXT,
+                status TEXT NOT NULL DEFAULT 'OPEN'
+                    CHECK(status IN ('OPEN','RESOLVED'))
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS idx_learning_match " +
+                "ON learning_opportunities(status,trader,token,entry_time)"
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS idx_learning_exit " +
+                "ON learning_opportunities(exit_time,lifecycle_group_id)"
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS idx_learning_buy_key " +
+                "ON learning_opportunities(buy_notification_key)"
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS execution_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                notification_key TEXT NOT NULL,
+                action TEXT NOT NULL,
+                status TEXT NOT NULL,
+                event_time INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS idx_execution_event_key_time " +
+                "ON execution_events(notification_key,event_time)"
+        )
+    }
 
     fun <T> transaction(block: (SQLiteDatabase) -> T): T {
         val db = writableDatabase
@@ -276,6 +348,121 @@ class StrategyDatabase(context: Context) :
             put("entry_time", entryTime)
             put("status", "OPEN")
         }, SQLiteDatabase.CONFLICT_IGNORE)
+    }
+
+    fun addLearningOpportunity(
+        db: SQLiteDatabase,
+        notificationKey: String,
+        trader: String,
+        token: String,
+        marketCap: Double,
+        sourceBuyUsd: Double,
+        entryTime: Long,
+        forecastModelId: String,
+        policyModelId: String,
+        probability: Double?,
+        predictedRoi: Double?,
+        confidenceRank: Double?
+    ) {
+        val opportunityId = "$notificationKey@$entryTime"
+        db.insertWithOnConflict("learning_opportunities", null, ContentValues().apply {
+            put("opportunity_id", opportunityId)
+            put("buy_notification_key", notificationKey)
+            put("trader", trader)
+            put("token", token)
+            put("entry_market_cap", marketCap)
+            put("source_buy_usd", sourceBuyUsd)
+            put("entry_time", entryTime)
+            put("forecast_model_id", forecastModelId)
+            put("policy_model_id", policyModelId)
+            put("predicted_probability", probability?.takeIf { it.isFinite() })
+            put("predicted_roi", predictedRoi?.takeIf { it.isFinite() })
+            put("confidence_rank", confidenceRank?.takeIf { it.isFinite() })
+            put("status", "OPEN")
+        }, SQLiteDatabase.CONFLICT_IGNORE)
+    }
+
+    /** Resolve every earlier buy against the first later sell for the trader/token pair. */
+    fun resolveLearningOpportunities(
+        db: SQLiteDatabase,
+        sellNotificationKey: String,
+        trader: String,
+        token: String,
+        exitMarketCap: Double,
+        exitTime: Long
+    ): Int {
+        val lifecycleId = listOf(
+            trader.lowercase(), token.lowercase(), sellNotificationKey
+        ).joinToString("|")
+        val values = ContentValues().apply {
+            put("exit_notification_key", sellNotificationKey)
+            put("exit_market_cap", exitMarketCap)
+            put("exit_time", exitTime)
+            put("lifecycle_group_id", lifecycleId)
+            put("status", "RESOLVED")
+        }
+        val ids = mutableListOf<Pair<String, Double>>()
+        db.rawQuery(
+            "SELECT opportunity_id,entry_market_cap FROM learning_opportunities " +
+                "WHERE status='OPEN' AND lower(trader)=lower(?) AND lower(token)=lower(?) " +
+                "AND entry_time<? ORDER BY entry_time,opportunity_id",
+            arrayOf(trader, token, exitTime.toString())
+        ).use { cursor ->
+            while (cursor.moveToNext()) ids += cursor.getString(0) to cursor.getDouble(1)
+        }
+        for ((id, entryMarketCap) in ids) {
+            val roi = exitMarketCap / entryMarketCap - 1.0
+            values.put("realized_source_roi", roi)
+            values.put("profitable", if (roi > 0.0) 1 else 0)
+            check(db.update("learning_opportunities", values, "opportunity_id=?", arrayOf(id)) == 1)
+        }
+        return ids.size
+    }
+
+    fun exportLearningCsv(destination: File): Int {
+        destination.parentFile?.mkdirs()
+        var rows = 0
+        destination.bufferedWriter().use { out ->
+            val columns = listOf(
+                "opportunity_id", "buy_notification_key", "trader", "token",
+                "entry_market_cap", "source_buy_usd", "entry_time", "forecast_model_id",
+                "policy_model_id", "predicted_probability", "predicted_roi", "confidence_rank",
+                "exit_notification_key", "exit_market_cap", "exit_time", "realized_source_roi",
+                "profitable", "lifecycle_group_id", "status"
+            )
+            out.appendLine(columns.joinToString(","))
+            readableDatabase.query(
+                "learning_opportunities", columns.toTypedArray(), null, null, null, null,
+                "entry_time,opportunity_id"
+            ).use { cursor ->
+                while (cursor.moveToNext()) {
+                    out.appendLine((columns.indices).joinToString(",") { index ->
+                        csv(if (cursor.isNull(index)) "" else cursor.getString(index))
+                    })
+                    rows++
+                }
+            }
+        }
+        return rows
+    }
+
+    fun exportExecutionCsv(destination: File): Int {
+        destination.parentFile?.mkdirs()
+        var rows = 0
+        destination.bufferedWriter().use { out ->
+            out.appendLine("id,notification_key,action,status,event_time")
+            readableDatabase.rawQuery(
+                "SELECT id,notification_key,action,status,event_time FROM execution_events ORDER BY id", null
+            ).use { cursor ->
+                while (cursor.moveToNext()) {
+                    out.appendLine((0 until cursor.columnCount).joinToString(",") { index ->
+                        csv(if (cursor.isNull(index)) "" else cursor.getString(index))
+                    })
+                    rows++
+                }
+            }
+        }
+        return rows
     }
 
     fun openShadowLots(db: SQLiteDatabase, trader: String, token: String, exitTime: Long): List<Pair<Long, Double>> {
@@ -383,6 +570,7 @@ class StrategyDatabase(context: Context) :
             put("principal", plan.principal); put("gross_value", plan.grossValue); put("fee", plan.fee)
             put("status", plan.status); put("created_time", plan.createdTime); put("updated_time", plan.createdTime)
         })
+        recordExecutionEvent(db, plan.notificationKey, plan.action, plan.status, plan.createdTime)
     }
 
     fun getPlan(db: SQLiteDatabase, key: String): StrategyPlan? = db.rawQuery(
@@ -391,11 +579,25 @@ class StrategyDatabase(context: Context) :
     ).use { c -> if (c.moveToFirst()) c.toPlan() else null }
 
     fun setPlanStatus(db: SQLiteDatabase, key: String, status: String) {
+        val now = System.currentTimeMillis()
+        val action = db.rawQuery("SELECT action FROM plans WHERE notification_key=?", arrayOf(key)).use {
+            if (it.moveToFirst()) it.getString(0) else null
+        }
         db.update("plans", ContentValues().apply {
-            put("status", status); put("updated_time", System.currentTimeMillis())
+            put("status", status); put("updated_time", now)
         }, "notification_key=?", arrayOf(key))
         db.update("decisions", ContentValues().apply { put("execution_status", status) },
             "notification_key=?", arrayOf(key))
+        if (action != null) recordExecutionEvent(db, key, action, status, now)
+    }
+
+    private fun recordExecutionEvent(
+        db: SQLiteDatabase, key: String, action: String, status: String, timeMs: Long
+    ) {
+        db.insertOrThrow("execution_events", null, ContentValues().apply {
+            put("notification_key", key); put("action", action)
+            put("status", status); put("event_time", timeMs)
+        })
     }
 
     fun cancelOrphanedPlanned(db: SQLiteDatabase) {
@@ -454,6 +656,11 @@ class StrategyDatabase(context: Context) :
 
     companion object {
         const val DB_NAME = "adaptive_hybrid_v2.db"
-        private const val DB_VERSION = 1
+        private const val DB_VERSION = 2
+
+        private fun csv(value: String): String =
+            if (value.any { it == ',' || it == '"' || it == '\n' || it == '\r' }) {
+                "\"${value.replace("\"", "\"\"")}\""
+            } else value
     }
 }

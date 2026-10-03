@@ -28,14 +28,19 @@ data class ModelParityFixture(
 /** Exact JVM evaluator for the fitted sklearn HistGradientBoosting bundle. */
 class AdaptiveHybridModel private constructor(
     val version: String,
+    val schemaVersion: String,
+    val modelId: String,
+    val parentModelId: String?,
     val trainedThrough: String,
     val matchingRule: String,
     val roiUncertaintyScale: Double,
-    val config: StrategyConfig,
+    /** Legacy generation-0 bootstrap only. Active policy is loaded separately. */
+    val config: StrategyConfig?,
     private val excludedTraders: Set<String>,
     private val confidenceReference: DoubleArray,
     private val classifier: Ensemble,
     private val regressor: Ensemble,
+    private val recentAdapter: RecentAdapter?,
     val parityFixtures: List<ModelParityFixture>
 ) {
     fun score(trader: String, marketCap: Double, sourceBuyUsd: Double): HybridScore {
@@ -45,8 +50,16 @@ class AdaptiveHybridModel private constructor(
             return HybridScore(true, Double.NaN, Double.NaN, 0.0)
         }
 
-        val probability = sigmoid(classifier.predict(trader, marketCap, sourceBuyUsd))
-        val roi = regressor.predict(trader, marketCap, sourceBuyUsd)
+        val stableProbability = sigmoid(classifier.predict(trader, marketCap, sourceBuyUsd))
+        val stableRoi = regressor.predict(trader, marketCap, sourceBuyUsd)
+        val probability = recentAdapter?.let { adapter ->
+            (1.0 - adapter.probabilityWeight) * stableProbability +
+                adapter.probabilityWeight * sigmoid(adapter.classifier.predict(trader, marketCap, sourceBuyUsd))
+        } ?: stableProbability
+        val roi = recentAdapter?.let { adapter ->
+            (1.0 - adapter.roiWeight) * stableRoi +
+                adapter.roiWeight * adapter.regressor.predict(trader, marketCap, sourceBuyUsd)
+        } ?: stableRoi
         val confidence = upperBound(confidenceReference, probability).toDouble() /
             confidenceReference.size.coerceAtLeast(1)
         return HybridScore(false, probability, roi, confidence)
@@ -117,6 +130,40 @@ class AdaptiveHybridModel private constructor(
         }
     }
 
+    private data class RecentAdapter(
+        val probabilityWeight: Double,
+        val roiWeight: Double,
+        val classifier: Ensemble,
+        val regressor: Ensemble
+    )
+
+    fun validateParity(tolerance: Double = 1e-10) {
+        require(modelId.isNotBlank()) { "Forecast modelId is blank" }
+        require(parityFixtures.isNotEmpty()) { "Forecast parity fixtures are empty" }
+        require(confidenceReference.isNotEmpty()) { "Confidence reference is empty" }
+        require((1 until confidenceReference.size).all { index ->
+            confidenceReference[index - 1] <= confidenceReference[index]
+        }) {
+            "Confidence reference is not sorted"
+        }
+        require(roiUncertaintyScale.isFinite() && roiUncertaintyScale >= 0.0) {
+            "Invalid ROI uncertainty scale"
+        }
+        for (fixture in parityFixtures) {
+            val actual = score(fixture.trader, fixture.marketCap, fixture.sourceBuyUsd)
+            if (actual.excluded) continue
+            require(kotlin.math.abs(actual.probabilityProfitableExit - fixture.probability) <= tolerance) {
+                "Classifier parity failed for ${fixture.trader}"
+            }
+            require(kotlin.math.abs(actual.predictedRoi - fixture.predictedRoi) <= tolerance) {
+                "Regressor parity failed for ${fixture.trader}"
+            }
+            require(kotlin.math.abs(actual.confidenceRank - fixture.confidenceRank) <= tolerance) {
+                "Confidence parity failed for ${fixture.trader}"
+            }
+        }
+    }
+
     companion object {
         // AAPT removes the .gz suffix from gzip-compressed assets in the APK.
         // The repository/source fixture remains .json.gz and is loaded with
@@ -138,21 +185,48 @@ class AdaptiveHybridModel private constructor(
             return fromJson(root)
         }
 
+        fun fromJsonText(text: String): AdaptiveHybridModel = fromJson(JSONObject(text))
+
+        fun fromGzipBytes(bytes: ByteArray): AdaptiveHybridModel =
+            fromGzip(bytes.inputStream())
+
         private fun fromJson(root: JSONObject): AdaptiveHybridModel {
-            require(root.getString("version") == "adaptive_hybrid_v2") {
-                "Unsupported strategy model ${root.optString("version")}"
+            val version = root.optString("version", "")
+            val schemaVersion = root.optString(
+                "schemaVersion",
+                if (version == "adaptive_hybrid_v2") "adaptive_hybrid_hgb_v1" else ""
+            )
+            require(schemaVersion == "adaptive_hybrid_hgb_v1") {
+                "Unsupported forecast schema $schemaVersion"
+            }
+            val adapter = root.optJSONObject("recentAdapter")?.let { json ->
+                val probabilityWeight = json.getDouble("probabilityWeight")
+                val roiWeight = json.getDouble("roiWeight")
+                require(probabilityWeight in 0.0..0.35 && roiWeight in 0.0..0.35) {
+                    "Recent adapter influence exceeds the 35% safety cap"
+                }
+                RecentAdapter(
+                    probabilityWeight,
+                    roiWeight,
+                    parseEnsemble(json.getJSONObject("classifier")),
+                    parseEnsemble(json.getJSONObject("regressor"))
+                )
             }
             return AdaptiveHybridModel(
-                version = root.getString("version"),
+                version = version.ifBlank { schemaVersion },
+                schemaVersion = schemaVersion,
+                modelId = root.optString("modelId", version.ifBlank { "adaptive_hybrid_v2" }),
+                parentModelId = root.optString("parentModelId").takeIf { it.isNotBlank() },
                 trainedThrough = root.getString("trainedThrough"),
                 matchingRule = root.getString("matchingRule"),
                 roiUncertaintyScale = root.getDouble("roiUncertaintyScale"),
-                config = StrategyConfig.fromJson(root.getJSONObject("config")),
+                config = root.optJSONObject("config")?.let(StrategyConfig::fromJson),
                 excludedTraders = root.getJSONArray("excludedTraders").strings()
                     .map { it.lowercase(Locale.ROOT) }.toSet(),
                 confidenceReference = root.getJSONArray("confidenceReference").doubles(),
                 classifier = parseEnsemble(root.getJSONObject("classifier")),
                 regressor = parseEnsemble(root.getJSONObject("regressor")),
+                recentAdapter = adapter,
                 parityFixtures = root.getJSONArray("fixtures").objects().map { fixture ->
                     ModelParityFixture(
                         trader = fixture.getString("trader"),

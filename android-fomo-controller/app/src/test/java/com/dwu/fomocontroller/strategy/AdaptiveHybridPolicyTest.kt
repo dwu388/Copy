@@ -22,7 +22,7 @@ class AdaptiveHybridPolicyTest {
 
     @Test
     fun deteriorationIsImmediateAndRecoveryIsHysteretic() {
-        val cfg = model().config
+        val cfg = requireNotNull(model().config)
         val state = RuntimeSnapshot(cash = 800.0, openCost = 0.0, peakEquity = 1_000.0)
         AdaptiveHybridPolicy.updateMode(state, cfg)
         assertEquals("DEFENSIVE", state.mode)
@@ -51,7 +51,7 @@ class AdaptiveHybridPolicyTest {
             predictedRoi = 1.0,
             confidence = 0.799999,
             state = state,
-            cfg = model.config,
+            cfg = requireNotNull(model.config),
             feeDiscount = 0.0,
             roiUncertaintyScale = model.roiUncertaintyScale,
             openByTrader = emptyMap(),
@@ -69,7 +69,7 @@ class AdaptiveHybridPolicyTest {
             predictedRoi = 1.0,
             confidence = 0.95,
             state = RuntimeSnapshot(),
-            cfg = model.config,
+            cfg = requireNotNull(model.config),
             feeDiscount = 0.0,
             roiUncertaintyScale = model.roiUncertaintyScale,
             openByTrader = emptyMap(),

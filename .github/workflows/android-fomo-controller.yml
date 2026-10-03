@@ -26,6 +26,18 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: android-fomo-controller/learning/requirements.txt
+
+      - name: Install learning dependencies
+        run: python -m pip install -r learning/requirements.txt
+
+      - name: Run learning tests
+        run: python -m unittest discover -s learning/tests -v
+
       - name: Run unit tests
         run: ./gradlew testDebugUnitTest
 

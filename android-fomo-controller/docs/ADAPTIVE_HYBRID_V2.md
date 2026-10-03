@@ -1,6 +1,6 @@
 # Adaptive Hybrid v2 Android implementation
 
-## Frozen opportunity model
+## Generation-0 opportunity model
 
 The app embeds the fitted sklearn bundle as `adaptive_hybrid_v2.json.gz` and
 evaluates its trees directly in Kotlin. The port preserves:
@@ -17,6 +17,10 @@ evaluates its trees directly in Kotlin. The port preserves:
 
 The export script is `tools/export_adaptive_hybrid_v2.py`. JVM parity tests
 compare Kotlin inference with sklearn predictions stored during export.
+
+Adaptive Hybrid v2 remains the immutable bundled bootstrap champion. New
+forecast and policy artifacts are versioned and promoted independently through
+the recursive workflow in `RECURSIVE_LEARNING.md`; they do not modify this asset.
 
 ## Selected controller
 

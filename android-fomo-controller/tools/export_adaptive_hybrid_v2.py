@@ -94,6 +94,9 @@ def main() -> None:
 
     payload = {
         "version": bundle["version"],
+        "schemaVersion": "adaptive_hybrid_hgb_v1",
+        "modelId": bundle.get("model_id", bundle["version"]),
+        "parentModelId": bundle.get("parent_model_id"),
         "trainedThrough": base["trained_through"],
         "featureContract": base["feature_contract"],
         "matchingRule": base["matching_rule"],

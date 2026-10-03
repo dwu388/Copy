@@ -174,6 +174,16 @@ class MainActivity : Activity() {
         })
 
         root.addView(Button(this).apply {
+            text = "Export recursive-learning CSV"
+            setOnClickListener { exportLearningData() }
+        })
+
+        root.addView(Button(this).apply {
+            text = "Export execution-calibration CSV"
+            setOnClickListener { exportExecutionData() }
+        })
+
+        root.addView(Button(this).apply {
             text = "Refresh events"
             setOnClickListener { refresh() }
         })
@@ -318,6 +328,52 @@ class MainActivity : Activity() {
                             "Raw export failed: ${error.message}",
                             Toast.LENGTH_LONG
                         ).show()
+                    }
+                }
+        }.start()
+    }
+
+    private fun exportLearningData() {
+        val directory = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
+            ?: File(filesDir, "exports")
+        val destination = File(directory, "copy_learning_opportunities.csv")
+        Thread {
+            runCatching { AdaptiveHybridEngine.exportLearningCsv(destination) }
+                .onSuccess { rows ->
+                    runOnUiThread {
+                        Toast.makeText(
+                            this,
+                            "Exported $rows learning rows to ${destination.absolutePath}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+                .onFailure { error ->
+                    runOnUiThread {
+                        Toast.makeText(
+                            this,
+                            "Learning export failed: ${error.message}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+        }.start()
+    }
+
+    private fun exportExecutionData() {
+        val directory = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
+            ?: File(filesDir, "exports")
+        val destination = File(directory, "copy_execution_events.csv")
+        Thread {
+            runCatching { AdaptiveHybridEngine.exportExecutionCsv(destination) }
+                .onSuccess { rows ->
+                    runOnUiThread {
+                        Toast.makeText(this, "Exported $rows execution events.", Toast.LENGTH_LONG).show()
+                    }
+                }
+                .onFailure { error ->
+                    runOnUiThread {
+                        Toast.makeText(this, "Execution export failed: ${error.message}", Toast.LENGTH_LONG).show()
                     }
                 }
         }.start()
