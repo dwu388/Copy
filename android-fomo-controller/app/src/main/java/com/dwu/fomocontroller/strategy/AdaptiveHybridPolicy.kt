@@ -104,7 +104,22 @@ data class StrategyConfig(
                 recentCandidateReserveMultiple = j.getDouble("recent_candidate_reserve_multiple"),
                 recentCandidateReserveCapFraction = j.getDouble("recent_candidate_reserve_cap_fraction"),
                 slippagePerSide = j.getDouble("slippage_per_side")
-            )
+            ).also { config ->
+                require(config.modes.keys == setOf("NORMAL", "CAUTION", "DEFENSIVE"))
+                for ((name, mode) in config.modes) {
+                    require(mode.confidenceThreshold in 0.0..1.0) { "$name confidence is invalid" }
+                    require(mode.ratioFloor >= 1.0) { "$name ratio floor is invalid" }
+                    require(mode.reserveFloorUsd >= 0.0 && mode.reserveFraction in 0.0..1.0)
+                    require(mode.maxOpenExposure in 0.0..1.0)
+                    require(mode.maxTraderExposure in 0.0..1.0)
+                    require(mode.maxTokenExposure in 0.0..1.0)
+                    require(mode.max15mNewExposure in 0.0..1.0)
+                    require(mode.uncertaintyMultiplier >= 0.0)
+                }
+                require(config.baseConfidenceThreshold in 0.0..1.0)
+                require(config.confirmationExits > 0)
+                require(config.slippagePerSide in 0.0..0.25)
+            }
         }
     }
 }

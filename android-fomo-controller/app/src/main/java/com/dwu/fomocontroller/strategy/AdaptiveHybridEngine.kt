@@ -6,6 +6,7 @@ import com.dwu.fomocontroller.config.AppPreferences
 import com.dwu.fomocontroller.data.StrategyDatabase
 import com.dwu.fomocontroller.data.StrategyPlan
 import com.dwu.fomocontroller.data.StrategyStatus
+import java.io.File
 import kotlin.math.max
 
 data class AndroidStrategyDecision(
@@ -39,6 +40,8 @@ object AdaptiveHybridEngine {
     private const val DEDUPE_WINDOW_MS = 3 * 60_000L
 
     private lateinit var model: AdaptiveHybridModel
+    private lateinit var policyArtifact: PolicyArtifact
+    private lateinit var championSource: String
     private lateinit var db: StrategyDatabase
     private lateinit var prefs: AppPreferences
     @Volatile private var initialized = false
@@ -47,7 +50,10 @@ object AdaptiveHybridEngine {
     fun initialize(context: Context) {
         if (initialized) return
         val app = context.applicationContext
-        model = AdaptiveHybridModel.fromAssets(app)
+        val champions = ChampionStore.load(app)
+        model = champions.forecast
+        policyArtifact = champions.policy
+        championSource = champions.source
         db = StrategyDatabase(app)
         prefs = AppPreferences(app)
         db.transaction(db::cancelOrphanedPlanned)
@@ -87,15 +93,22 @@ object AdaptiveHybridEngine {
             }
             db.recordSeen(sql, key, fingerprint, nowMs)
             var state = db.loadState(sql, nowMs)
-            AdaptiveHybridPolicy.updateStage(state, model.config, afterExit = false)
-            AdaptiveHybridPolicy.updateMode(state, model.config)
+            val config = policyArtifact.config
+            AdaptiveHybridPolicy.updateStage(state, config, afterExit = false)
+            AdaptiveHybridPolicy.updateMode(state, config)
+
+            db.addLearningOpportunity(
+                sql, key, trader, token, marketCap, sourceAmount, nowMs,
+                model.modelId, policyArtifact.policyModelId,
+                score.probabilityProfitableExit, score.predictedRoi, score.confidenceRank
+            )
 
             if (score.excluded) {
                 db.saveState(sql, state)
                 return@transaction skipAndRecord(sql, key, "bought", "EXCLUDED_TRADER", trader, token,
                     marketCap, sourceAmount, nowMs, score, state.mode)
             }
-            if (score.confidenceRank >= model.config.baseConfidenceThreshold) {
+            if (score.confidenceRank >= config.baseConfidenceThreshold) {
                 db.addShadowLot(sql, key, trader, token, marketCap, score.predictedRoi,
                     score.confidenceRank, nowMs)
                 state.qualifyingSignalTimes += nowMs
@@ -111,7 +124,7 @@ object AdaptiveHybridEngine {
             )
             val policy = AdaptiveHybridPolicy.chooseBuy(
                 nowMs, trader, token, sourceAmount, score.predictedRoi, score.confidenceRank,
-                reservedState, model.config, prefs.feeDiscount, model.roiUncertaintyScale,
+                reservedState, config, prefs.feeDiscount, model.roiUncertaintyScale,
                 exposure.byTrader, exposure.byToken, exposure.recentEntries
             )
             val intended = if (policy.reason == "MODE_CONFIDENCE") null else sourceAmount / policy.effectiveRatio
@@ -148,6 +161,8 @@ object AdaptiveHybridEngine {
         }
         db.recordSeen(sql, key, fingerprint, nowMs)
         val state = db.loadState(sql, nowMs)
+        val config = policyArtifact.config
+        db.resolveLearningOpportunities(sql, key, trader, token, marketCap, nowMs)
 
         // Every top-20% source opportunity informs the controller, including skipped copies.
         for ((shadowId, entryMarketCap) in db.openShadowLots(sql, trader, token, nowMs)) {
@@ -157,7 +172,7 @@ object AdaptiveHybridEngine {
             while (state.shadowReturns.size > 20) state.shadowReturns.removeAt(0)
             state.shadowLosingStreak = if (roi <= 0.0) state.shadowLosingStreak + 1 else 0
             state.exitsSinceModeChange++
-            AdaptiveHybridPolicy.updateMode(state, model.config)
+            AdaptiveHybridPolicy.updateMode(state, config)
         }
 
         val positions = db.openPositions(sql, trader, token)
@@ -173,7 +188,7 @@ object AdaptiveHybridEngine {
         }
         val principal = positions.sumOf { it.principal }
         val gross = positions.sumOf { position ->
-            position.principal * (marketCap / position.entryMarketCap) * (1.0 - model.config.slippagePerSide)
+            position.principal * (marketCap / position.entryMarketCap) * (1.0 - config.slippagePerSide)
         }.coerceAtLeast(0.0)
         val fee = AdaptiveHybridPolicy.orderFee(gross, prefs.feeDiscount)
         recordDecision(sql, key, "sold", "EXECUTE", "MATCHED_CONFIRMED_POSITION", state.mode,
@@ -233,9 +248,20 @@ object AdaptiveHybridEngine {
         return db.status()
     }
 
+    fun exportLearningCsv(destination: File): Int {
+        ensureInitialized()
+        return db.exportLearningCsv(destination)
+    }
+
+    fun exportExecutionCsv(destination: File): Int {
+        ensureInitialized()
+        return db.exportExecutionCsv(destination)
+    }
+
     fun modelDescription(): String {
         ensureInitialized()
-        return "${model.version} (${model.config.name}), trained through ${model.trainedThrough}"
+        return "${model.modelId} + ${policyArtifact.policyModelId} " +
+            "[$championSource], trained through ${model.trainedThrough}"
     }
 
     private fun executePlan(key: String, finalStatus: String): String {
@@ -265,8 +291,8 @@ object AdaptiveHybridEngine {
                 state.cash += max(0.0, plan.grossValue - plan.fee)
                 state.openCost = max(0.0, state.openCost - principal)
                 db.closePositions(sql, positions, key, System.currentTimeMillis())
-                AdaptiveHybridPolicy.updateMode(state, model.config)
-                AdaptiveHybridPolicy.updateStage(state, model.config, afterExit = true)
+                AdaptiveHybridPolicy.updateMode(state, policyArtifact.config)
+                AdaptiveHybridPolicy.updateStage(state, policyArtifact.config, afterExit = true)
             }
             state.peakEquity = max(state.peakEquity, state.equity())
             db.saveState(sql, state)
@@ -324,6 +350,8 @@ object AdaptiveHybridEngine {
             put("intended_size", intendedSize); put("copy_amount", copyAmount); put("fee", fee)
             put("reserve_required", policy?.reserveRequired); put("created_time", nowMs)
             put("execution_status", executionStatus)
+            put("forecast_model_id", model.modelId)
+            put("policy_model_id", policyArtifact.policyModelId)
         })
     }
 

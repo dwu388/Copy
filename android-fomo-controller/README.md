@@ -12,6 +12,10 @@ Prototype Android companion app for running the Fomo notification workflow mostl
 - Preserves Android notification key, ID, tag, post time, capture time, title, normal text, expanded text, selected text, channel/group/category metadata, content-intent presence, and action count.
 - Runs the fitted Adaptive Hybrid v2 classifier, ROI regressor, confidence rank,
   fee gate, sizing ladder, and NORMAL/CAUTION/DEFENSIVE controller locally.
+- Records every complete de-duplicated BUY as unbiased recursive-learning evidence,
+  then resolves it only on the first later matching SELL.
+- Loads independently versioned forecast and policy champions only after SHA-256,
+  schema, parity-fixture, and sanity validation, with previous/bundled rollback.
 - Keeps shadow outcomes for every model top-20% buy, including skipped copies.
 - Maintains a separate confirmed/paper position ledger and never routes an
   unowned sell.
@@ -72,6 +76,19 @@ adb pull /sdcard/Android/data/com.dwu.fomocontroller/files/Documents/fomo_buy_se
 ~~~
 
 The dashboard clear button is intentionally limited to the controller state log. It does not erase the append-only raw recorder.
+
+## Recursive model improvement
+
+The v0.3 controller preserves Adaptive Hybrid v2 as the bundled generation-0
+champion and adds protected local champion/challenger maintenance. Training stays
+on Windows; Android performs capture, inference, causal outcome recording,
+artifact validation, and atomic activation. New information never directly
+overwrites the active model.
+
+Use **Export recursive-learning CSV** for forecast/policy evidence and **Export
+execution-calibration CSV** for prepare/confirmation/failure timing. See
+`docs/RECURSIVE_LEARNING.md` for the complete training, one-use cohort,
+independent policy promotion, staging, and rollback workflow.
 
 ## Requirements
 
