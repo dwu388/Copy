@@ -26,7 +26,8 @@ REQUIRED = {
 
 
 def load_learning_csv(path: Path) -> pd.DataFrame:
-    frame = pd.read_csv(path)
+    # Coin tickers such as "NA" are literal identifiers, not pandas nulls.
+    frame = pd.read_csv(path, keep_default_na=False, na_values=[""])
     missing = REQUIRED - set(frame.columns)
     if missing:
         raise ValueError(f"Learning export is missing columns: {sorted(missing)}")

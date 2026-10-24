@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
+import math
 from pathlib import Path
 from typing import Literal
 
@@ -35,7 +36,7 @@ def _number(value: object) -> float | None:
         number = float(value)
     except (TypeError, ValueError):
         return None
-    return number if pd.notna(number) else None
+    return number if math.isfinite(number) else None
 
 
 def load_trade_excel(path: Path, sheet_name: str | None = None, order: Order = "top-to-bottom") -> pd.DataFrame:
@@ -105,11 +106,12 @@ def build_trade_cycles(
     coin: str | None = None,
     pairing: Pairing = "fifo",
 ) -> pd.DataFrame:
-    """Pair BUY/SELL rows by normalized trader+coin while preserving row chronology.
+    """Resolve each open BUY at the first later SELL for its trader and coin.
 
-    Orphan sells are ignored. Remaining buys are emitted as OPEN. Closed-cycle
-    profitability uses source_amount proceeds minus source_amount cost, matching
-    the standalone historical cycle tracker used for win/loss labels.
+    The Android forecast labels price return from market cap, not the difference
+    between two notification dollar amounts (which may describe partial fills).
+    ``pairing`` is retained for CLI compatibility; first-sell resolution makes
+    FIFO and LIFO equivalent because a sell closes all earlier open buys.
     """
     if pairing not in {"fifo", "lifo"}:
         raise ValueError(f"Unsupported pairing: {pairing}")
@@ -142,14 +144,14 @@ def build_trade_cycles(
     def close_cycle(buy: pd.Series, sell: pd.Series) -> dict[str, object]:
         buy_amount = float(buy["source_amount"])
         sell_amount = float(sell["source_amount"])
-        profit = sell_amount - buy_amount
-        outcome = "win" if profit > 0 else ("loss" if profit < 0 else "breakeven")
+        roi = float(sell["market_cap"]) / float(buy["market_cap"]) - 1.0
+        outcome = "win" if roi > 0 else ("loss" if roi < 0 else "breakeven")
         return {
             "trader": buy["trader"],
             "coin": buy["coin"],
             "status": "closed",
             "outcome": outcome,
-            "is_win": int(profit > 0),
+            "is_win": int(roi > 0),
             "buy_sequence": int(buy["sequence"]),
             "sell_sequence": int(sell["sequence"]),
             "buy_row": int(buy["source_row"]),
@@ -160,8 +162,10 @@ def build_trade_cycles(
             "sell_market_cap": float(sell["market_cap"]),
             "buy_source_amount": buy_amount,
             "sell_source_amount": sell_amount,
-            "profit_usd": profit,
-            "return_pct": (sell_amount / buy_amount - 1.0) * 100.0,
+            # Dollar proceeds cannot be inferred from source notifications:
+            # a SELL amount may be a partial sale or aggregate multiple buys.
+            "profit_usd": pd.NA,
+            "return_pct": roi * 100.0,
         }
 
     for _, row in work.iterrows():
@@ -172,8 +176,9 @@ def build_trade_cycles(
         queue = open_buys[key]
         if not queue:
             continue
-        buy = queue.popleft() if pairing == "fifo" else queue.pop()
-        cycles.append(close_cycle(buy, row))
+        while queue:
+            buy = queue.popleft() if pairing == "fifo" else queue.pop()
+            cycles.append(close_cycle(buy, row))
 
     for queue in open_buys.values():
         for buy in queue:
