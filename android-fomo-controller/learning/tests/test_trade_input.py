@@ -50,7 +50,7 @@ class TradeInputTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "K:P schema mismatch"):
             load_trade_excel(path)
 
-    def test_fifo_ignores_orphan_sell_and_keeps_unmatched_buy_open(self) -> None:
+    def test_first_sell_resolves_all_earlier_buys_by_price(self) -> None:
         path = self._workbook([
             ["orphan sell", "sold", "Aurelius0121", "BINF", 1_300_000, 2500.00],
             ["buy one", "bought", "Aurelius0121", "BINF", 1_210_000, 2034.62],
@@ -59,14 +59,25 @@ class TradeInputTest(unittest.TestCase):
         ])
         trades = load_trade_excel(path)
         cycles = build_trade_cycles(trades, trader="aurelius0121", coin="binf")
-        self.assertEqual(["closed", "open"], cycles["status"].tolist())
+        self.assertEqual(["closed", "closed"], cycles["status"].tolist())
         self.assertEqual("win", cycles.loc[0, "outcome"])
         self.assertEqual(1, cycles.loc[0, "is_win"])
-        self.assertAlmostEqual(365.38, cycles.loc[0, "profit_usd"], places=2)
+        self.assertAlmostEqual((1_600_000 / 1_210_000 - 1) * 100, cycles.loc[0, "return_pct"])
+        self.assertTrue(cycles["profit_usd"].isna().all())
         self.assertEqual(3, cycles.loc[0, "buy_row"])
         self.assertEqual(5, cycles.loc[0, "sell_row"])
         self.assertEqual(4, cycles.loc[1, "buy_row"])
-        self.assertEqual("open", cycles.loc[1, "outcome"])
+        self.assertEqual("win", cycles.loc[1, "outcome"])
+        self.assertEqual(5, cycles.loc[1, "sell_row"])
+
+    def test_partial_sell_amount_cannot_reverse_price_outcome(self) -> None:
+        path = self._workbook([
+            ["buy", "bought", "trader", "COIN", 100_000, 1000],
+            ["partial sell", "sold", "trader", "COIN", 120_000, 100],
+        ])
+        cycle = build_trade_cycles(load_trade_excel(path)).iloc[0]
+        self.assertEqual(1, cycle["is_win"])
+        self.assertAlmostEqual(20, cycle["return_pct"])
 
     def test_bottom_to_top_reverses_chronology(self) -> None:
         path = self._workbook([

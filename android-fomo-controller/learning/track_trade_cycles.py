@@ -18,7 +18,7 @@ def default_output(input_path: Path, trader: str | None, coin: str | None) -> Pa
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Build FIFO/LIFO buy-sell cycles from Excel columns K:P only"
+        description="Resolve buys at first later sell from Excel columns K:P only"
     )
     parser.add_argument("input", type=Path)
     parser.add_argument("--output", type=Path)

@@ -98,9 +98,9 @@ Build model-label trade cycles with:
 py -3 -m learning.track_trade_cycles path\to\trades.xlsx --sheet Notifications
 ~~~
 
-The default pairing is FIFO by case-insensitive `trader + coin`. A sell with no earlier matching buy is ignored, and a buy with no later matching sell remains `open`. Closed-cycle profitability is based on `sell source_amount - buy source_amount`, preserving the standalone win/loss labeling workflow. Use `--order bottom-to-top` when the worksheet is newest-first, and optionally filter with `--trader` and `--coin`.
+Each first later sell resolves **all** earlier open buys with the same case-insensitive `trader + coin`, matching the Android learning loop. An orphan sell is ignored; a buy without a later sell remains `open`. The win label uses `sell market_cap / buy market_cap - 1`, because sell and buy notification dollar amounts may represent different quantities. `profit_usd` is unavailable from these fields. The `--pairing` option is retained for old commands but no longer changes the result. Use `--order bottom-to-top` when worksheet rows are newest-first, and optionally filter with `--trader` and `--coin`.
 
-This Excel cycle builder is an upstream historical/incoming-data utility. The protected recursive champion-promotion loop still consumes `copy_learning_opportunities.csv`, because that export contains causal timestamps, lifecycle groups, and model/policy IDs that K:P alone does not contain.
+This Excel cycle builder is an upstream historical/incoming-data utility. The protected recursive champion-promotion loop still consumes `copy_learning_opportunities.csv`, because K:P alone does not contain timestamps, lifecycle groups, or model/policy IDs. A legacy `Time / Type / Title / Text` workbook is a **different** format; use `learning.prepare_historical` to create a local learning CSV from its `Notifications` sheet. Historical exports have no notification keys and no timezone metadata. Do not substitute them into an already active promotion registry or claim an independent holdout against a model already trained on their dates.
 
 
 ## Recursive model improvement
