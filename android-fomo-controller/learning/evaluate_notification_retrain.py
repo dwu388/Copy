@@ -1,4 +1,4 @@
-"""Chronological, untouched evaluation of a historical notification forecast."""
+"""Train from scratch on earlier notifications and evaluate later held-out trades."""
 from __future__ import annotations
 
 import argparse
@@ -12,7 +12,7 @@ from sklearn.metrics import brier_score_loss, roc_auc_score
 
 from learning.core import (
     FEATURES, build_payload, compare_grouped, fit_models, load_learning_csv,
-    read_payload, score_payload,
+    read_payload, score_payload, write_payload,
 )
 
 
@@ -36,6 +36,8 @@ def main() -> None:
     parser.add_argument("--validation-start", required=True, help="UTC date (inclusive)")
     parser.add_argument("--test-start", required=True, help="UTC date (inclusive)")
     parser.add_argument("--champion", type=Path, help="Existing bundled/active forecast artifact")
+    parser.add_argument("--output-model", type=Path, help="Save a train-only experimental .json.gz model")
+    parser.add_argument("--model-id", default="raw_notifications_train_only")
     args = parser.parse_args()
     train_before, val_start, test_start = map(_ms, [
         args.train_before, args.validation_start, args.test_start,
@@ -49,7 +51,12 @@ def main() -> None:
     if min(map(len, [train, validation, test])) == 0:
         parser.error("The chronological training, validation, and test periods must each have labels")
     classifier, _ = fit_models(train)
+    validation_probabilities = classifier.predict_proba(validation[FEATURES])[:, 1]
+    # This cutoff is fixed before inspecting test labels or test score ranks.
+    probability_cutoff = float(np.quantile(validation_probabilities, 0.90))
     results: dict = {"training_rows": len(train), "training_lifecycles": train.lifecycle_group_id.nunique(),
+                     "trained_through_utc": pd.to_datetime(train.exit_time.max(), unit="ms", utc=True).isoformat(),
+                     "validation_top_decile_probability_cutoff": probability_cutoff,
                      "label": "gross sell_market_cap / buy_market_cap - 1",
                      "net_proxy": "gross ROI minus two max($0.95,0.5% of source_buy_usd/20) fees"}
     for name, part in [("validation", validation), ("test", test)]:
@@ -60,6 +67,9 @@ def main() -> None:
         size = part.source_buy_usd.to_numpy() / 20
         net_roi = part.realized_source_roi.to_numpy() - 2 * np.maximum(0.95, 0.005 * size) / size
         net_wins = int((net_roi[selected] > 0).sum())
+        fixed = probabilities >= probability_cutoff
+        fixed_count = int(fixed.sum())
+        fixed_net_wins = int((net_roi[fixed] > 0).sum())
         results[name] = {
             "rows": len(part), "lifecycles": part.lifecycle_group_id.nunique(),
             "gross_base_win_rate": float(part.profitable.mean()),
@@ -71,7 +81,17 @@ def main() -> None:
             "top_decile_net_proxy_wins": net_wins,
             "top_decile_net_proxy_win_rate": net_wins / n,
             "top_decile_net_proxy_wilson_lower_95": _wilson_lower(net_wins, n),
+            "fixed_cutoff_count": fixed_count,
+            "fixed_cutoff_net_proxy_wins": fixed_net_wins,
+            "fixed_cutoff_net_proxy_win_rate": fixed_net_wins / fixed_count if fixed_count else None,
+            "fixed_cutoff_net_proxy_wilson_lower_95": _wilson_lower(fixed_net_wins, fixed_count),
         }
+    if args.output_model:
+        if args.output_model.suffix != ".gz" or not args.output_model.name.endswith(".json.gz"):
+            parser.error("--output-model must end in .json.gz")
+        experimental = build_payload(train, args.model_id, "none", adapter_weight=0)
+        write_payload(experimental, args.output_model)
+        results["experimental_model"] = str(args.output_model)
     if args.champion:
         champion = read_payload(args.champion)
         challenger = build_payload(train, "offline_raw_csv_trial", champion.get("modelId", "adaptive_hybrid_v2"),

@@ -107,6 +107,15 @@ The Android raw recorder's `fomo_buy_sell_notifications.csv` is a separate forma
 .learning-venv\Scripts\python.exe -m learning.evaluate_notification_retrain local_learning_state\raw_learning.csv --train-before YYYY-MM-DD --validation-start YYYY-MM-DD --test-start YYYY-MM-DD --champion app\src\main\assets\adaptive_hybrid_v2.json.gz
 ~~~
 
+To train **from scratch** without using the bundled model, omit `--champion`
+and add `--output-model local_learning_state\experiments\scratch.json.gz`
+and `--model-id scratch_date`. Only rows with exits before `--train-before`
+enter the fitted artifact. The next period supplies a fixed top-decile score
+cutoff; the test period reports both that forward-usable cutoff and descriptive
+top-decile ranking. Do not tune the cutoff or model after seeing test outcomes
+and then cite that same test as untouched. The exported artifact is experimental,
+not an activated champion. Its `trainedThrough` must precede the holdout.
+
 The raw recorder retains repeated callbacks, so preparation applies the Android three-minute duplicate fingerprint and first-later-sell rules. Open buys remain unknown. Timestamps come from `post_time` (milliseconds UTC), not capture time. Test dates must be later than training dates; evaluate on untouched lifecycles before proposing any champion. The protected recursive promotion loop still consumes the app's separate `copy_learning_opportunities.csv`, with its forecast/policy IDs and one-use cohort registry. K:P workbook rows have no timestamps or lifecycle IDs and cannot directly replace that export.
 
 
