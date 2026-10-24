@@ -77,6 +77,32 @@ adb pull /sdcard/Android/data/com.dwu.fomocontroller/files/Documents/fomo_buy_se
 
 The dashboard clear button is intentionally limited to the controller state log. It does not erase the append-only raw recorder.
 
+## Historical/incoming Excel source contract
+
+For historical and incoming workbook analysis, the authoritative trade fields are **Excel columns K:P only**:
+
+~~~text
+K  selected_text
+L  action
+M  trader
+N  coin
+O  market_cap
+P  source_amount
+~~~
+
+Columns A:J and Q onward are ignored by the historical trade-cycle reader. The K:P headers must match exactly; a shifted or older workbook schema fails closed instead of falling back to the old `Time / Type / Title / Text` parsing path.
+
+Build model-label trade cycles with:
+
+~~~bat
+py -3 -m learning.track_trade_cycles path\to\trades.xlsx --sheet Notifications
+~~~
+
+The default pairing is FIFO by case-insensitive `trader + coin`. A sell with no earlier matching buy is ignored, and a buy with no later matching sell remains `open`. Closed-cycle profitability is based on `sell source_amount - buy source_amount`, preserving the standalone win/loss labeling workflow. Use `--order bottom-to-top` when the worksheet is newest-first, and optionally filter with `--trader` and `--coin`.
+
+This Excel cycle builder is an upstream historical/incoming-data utility. The protected recursive champion-promotion loop still consumes `copy_learning_opportunities.csv`, because that export contains causal timestamps, lifecycle groups, and model/policy IDs that K:P alone does not contain.
+
+
 ## Recursive model improvement
 
 The v0.3 controller preserves Adaptive Hybrid v2 as the bundled generation-0
