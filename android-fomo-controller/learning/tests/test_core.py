@@ -11,6 +11,19 @@ from learning.core import compare_grouped, load_learning_csv
 
 
 class LearningDataTest(unittest.TestCase):
+    def test_literal_na_token_is_not_a_missing_value(self) -> None:
+        row = pd.DataFrame([dict(
+            opportunity_id="coin-na", trader="a", token="NA", entry_market_cap=100,
+            source_buy_usd=50, entry_time=1000, exit_time=2000,
+            realized_source_roi=0.2, profitable=1,
+            lifecycle_group_id="group-na", status="RESOLVED",
+        )])
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "learning.csv"
+            row.to_csv(path, index=False)
+            actual = load_learning_csv(path)
+        self.assertEqual("NA", actual.loc[0, "token"])
+
     def test_unresolved_and_causally_invalid_rows_are_not_training_labels(self) -> None:
         rows = pd.DataFrame([
             dict(opportunity_id="ok", trader="a", token="x", entry_market_cap=100,

@@ -79,7 +79,7 @@ The dashboard clear button is intentionally limited to the controller state log.
 
 ## Historical/incoming Excel source contract
 
-For historical and incoming workbook analysis, the authoritative trade fields are **Excel columns K:P only**:
+For the K:P workbook format, the authoritative trade fields are **Excel columns K:P only**:
 
 ~~~text
 K  selected_text
@@ -98,9 +98,16 @@ Build model-label trade cycles with:
 py -3 -m learning.track_trade_cycles path\to\trades.xlsx --sheet Notifications
 ~~~
 
-The default pairing is FIFO by case-insensitive `trader + coin`. A sell with no earlier matching buy is ignored, and a buy with no later matching sell remains `open`. Closed-cycle profitability is based on `sell source_amount - buy source_amount`, preserving the standalone win/loss labeling workflow. Use `--order bottom-to-top` when the worksheet is newest-first, and optionally filter with `--trader` and `--coin`.
+The first later sell resolves all earlier buys for the same case-insensitive `trader + coin`. Orphan sells are ignored and unmatched buys remain `open`. The win label is `sell market_cap / buy market_cap - 1`; sell notification dollars may represent a partial sale and cannot establish realized profit. The `profit_usd` field is unavailable. The retained `--pairing` flag has no effect on first-sell labels. Use `--order bottom-to-top` when the worksheet is newest-first, and optionally filter with `--trader` and `--coin`.
 
-This Excel cycle builder is an upstream historical/incoming-data utility. The protected recursive champion-promotion loop still consumes `copy_learning_opportunities.csv`, because that export contains causal timestamps, lifecycle groups, and model/policy IDs that K:P alone does not contain.
+The Android raw recorder's `fomo_buy_sell_notifications.csv` is a separate format with timestamps, notification keys, and parsed trade fields. To prepare an **offline** learning experiment from it:
+
+~~~bat
+.learning-venv\Scripts\python.exe -m learning.prepare_raw_notifications fomo_buy_sell_notifications.csv local_learning_state\raw_learning.csv
+.learning-venv\Scripts\python.exe -m learning.evaluate_notification_retrain local_learning_state\raw_learning.csv --train-before YYYY-MM-DD --validation-start YYYY-MM-DD --test-start YYYY-MM-DD --champion app\src\main\assets\adaptive_hybrid_v2.json.gz
+~~~
+
+The raw recorder retains repeated callbacks, so preparation applies the Android three-minute duplicate fingerprint and first-later-sell rules. Open buys remain unknown. Timestamps come from `post_time` (milliseconds UTC), not capture time. Test dates must be later than training dates; evaluate on untouched lifecycles before proposing any champion. The protected recursive promotion loop still consumes the app's separate `copy_learning_opportunities.csv`, with its forecast/policy IDs and one-use cohort registry. K:P workbook rows have no timestamps or lifecycle IDs and cannot directly replace that export.
 
 
 ## Recursive model improvement
