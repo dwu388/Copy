@@ -1,8 +1,8 @@
 package com.dwu.fomocontroller.notification
 
 /**
- * Buy/sell notifications stay live only while their exact content intent may
- * still be needed. Every trade requires a durable raw-recorder row before it
+ * Selected buy/sell notifications stay live through UI verification and
+ * screenshot capture. Every trade requires a durable raw-recorder row before it
  * can be cleared. Missing controller-state rows are safe after durable capture,
  * so clearing the dashboard event log cannot strand notifications.
  *
@@ -13,7 +13,13 @@ object NotificationClearPolicy {
     private val notificationStillNeededStates = setOf(
         "ADAPTIVE_SELECTED",
         "QUEUED",
-        "OPENING"
+        "OPENING",
+        "VERIFYING",
+        "SCREENSHOT_PENDING",
+        "BUY_FIND_ENTRY",
+        "SELL_FIND_ENTRY",
+        "BUY_FILL_AMOUNT",
+        "SELL_FILL_AMOUNT"
     )
 
     fun isSafeToClear(state: String?, rawTradeRecorded: Boolean): Boolean =

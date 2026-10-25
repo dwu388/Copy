@@ -52,6 +52,7 @@ object AutomationCoordinator {
     fun onFomoUiChanged(root: AccessibilityNodeInfo?, service: AccessibilityService) {
         ensureInitialized()
         val key = activeKey ?: return
+        if (root?.packageName?.toString() != "family.fomo.app") return
         val event = db.get(key) ?: return
         val now = System.currentTimeMillis()
 
@@ -199,23 +200,33 @@ object AutomationCoordinator {
         }
 
         activeKey = key
-        activeStage = "OPENING"
+        activeStage = "VERIFYING"
         deadline = System.currentTimeMillis() + OPEN_TIMEOUT_MS
         db.updateState(key, "OPENING")
 
-        if (!FomoNotificationListener.openExactNotification(key)) {
-            failLocked(key, "INTENT_UNAVAILABLE", "Live notification/contentIntent was not available")
+        // Register the verification state before sending: a fast Fomo window
+        // event can arrive while PendingIntent.send() is still returning.
+        handler.postDelayed({
+            synchronized(this) {
+                if (activeKey == key && activeStage == "VERIFYING") {
+                    failLocked(key, "UI_TIMEOUT", "Fomo did not show the expected coin within ${OPEN_TIMEOUT_MS}ms; check background launch restrictions and accessibility access")
+                }
+            }
+        }, OPEN_TIMEOUT_MS)
+
+        val launchError = FomoNotificationListener.openExactNotification(key)
+        if (launchError != null) {
+            failLocked(key, "INTENT_UNAVAILABLE", launchError)
             return
         }
 
-        activeStage = "VERIFYING"
         db.updateState(key, "VERIFYING")
-        deadline = System.currentTimeMillis() + OPEN_TIMEOUT_MS
     }
 
     @Synchronized
     private fun finishLocked(key: String, state: String, detail: String? = null) {
         db.updateState(key, state, detail)
+        FomoNotificationListener.clearExactNotification(key)
         activeKey = null
         activeStage = "IDLE"
         deadline = 0L
@@ -224,6 +235,10 @@ object AutomationCoordinator {
 
     private fun completePaperAfterScreenshot(key: String, result: String) {
         if (activeKey != key || activeStage != "SCREENSHOT_PENDING") return
+        if (!result.startsWith("Screenshot: ")) {
+            failLocked(key, "SCREENSHOT_FAILED", result)
+            return
+        }
         val ledgerResult = AdaptiveHybridEngine.recordPaperExecution(key)
         if (!ledgerResult.startsWith("Recorded ")) {
             failLocked(key, "PAPER_LEDGER_FAILED", "$ledgerResult; $result")

@@ -1,7 +1,9 @@
 package com.dwu.fomocontroller.notification
 
+import android.app.ActivityOptions
 import android.app.Notification
 import android.app.PendingIntent
+import android.os.Build
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -117,6 +119,15 @@ class FomoNotificationListener : NotificationListenerService() {
                         )
                     }
                     .getOrElse { return@execute }
+
+                // Fomo may update the same notification while an earlier callback
+                // is already queued. Keep every raw callback, but do not replace
+                // the selected event with a duplicate FILTERED decision or clear
+                // its still-needed content intent.
+                val existing = db.get(sbn.key)
+                if (existing != null &&
+                    !NotificationClearPolicy.isSafeToClear(existing.state, true)
+                ) return@execute
 
                 val complete = parsed.action != null &&
                     parsed.trader != null &&
@@ -302,18 +313,30 @@ class FomoNotificationListener : NotificationListenerService() {
 
         @Volatile private var instance: FomoNotificationListener? = null
 
-        fun openExactNotification(notificationKey: String): Boolean {
-            val service = instance ?: return false
-            val active = runCatching { service.activeNotifications }.getOrNull() ?: return false
-            val sbn = active.firstOrNull { it.key == notificationKey } ?: return false
-            val intent = sbn.notification.contentIntent ?: return false
-
+        fun openExactNotification(notificationKey: String): String? {
+            val service = instance ?: return "Notification listener is disconnected"
+            val active = runCatching { service.activeNotifications }.getOrNull()
+                ?: return "Could not query active notifications"
+            val sbn = active.firstOrNull { it.key == notificationKey && it.packageName == FOMO_PACKAGE }
+                ?: return "Exact Fomo notification is no longer active"
+            val intent = sbn.notification.contentIntent ?: return "Fomo notification has no content intent"
             return try {
-                intent.send()
-                service.cancelSafely(notificationKey, "exact content intent invoked")
-                true
-            } catch (_: PendingIntent.CanceledException) {
-                false
+                if (Build.VERSION.SDK_INT >= 34) {
+                    val options = ActivityOptions.makeBasic()
+                        .setPendingIntentBackgroundActivityStartMode(
+                            ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+                        ).toBundle()
+                    intent.send(service, 0, null, null, null, null, options)
+                } else {
+                    intent.send()
+                }
+                Log.i(TAG, "Sent exact Fomo content intent for $notificationKey; awaiting page verification")
+                null
+            } catch (error: PendingIntent.CanceledException) {
+                "Fomo content intent was canceled"
+            } catch (error: RuntimeException) {
+                Log.e(TAG, "Could not send Fomo content intent for $notificationKey", error)
+                "Fomo content intent failed: ${error.javaClass.simpleName}: ${error.message}"
             }
         }
 
