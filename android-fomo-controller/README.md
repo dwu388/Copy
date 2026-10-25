@@ -231,11 +231,27 @@ For a qualifying event:
 2. invokes that notification's \`contentIntent\`;
 3. waits for Fomo;
 4. verifies the parsed coin is visible;
-5. records \`DRY_RUN_VERIFIED\`;
-6. records the selected action in the paper ledger;
+5. captures the verified Fomo page and its accessibility hierarchy (Android 11+);
+6. records the selected action in the paper ledger and \`DRY_RUN_VERIFIED\`;
 7. performs no Buy/Sell click.
 
 This is the recommended validation mode.
+
+Each selected buy or sell gets one capture after the expected coin is visible.
+If opening or verification fails, there is no verified Fomo page to capture.
+Screenshot errors are recorded on the event and do not prevent the simulated
+paper execution. PREPARE selector calibration is not needed for this capture.
+Images and matching accessibility hierarchy text files are stored in the
+app-specific \`Pictures/go_screenshots\` folder. The dashboard event detail
+shows the image path or capture error. Copy the folder from an attached device:
+
+~~~powershell
+adb -s ZY22L495GB pull /sdcard/Android/data/com.dwu.fomocontroller/files/Pictures/go_screenshots .\go_screenshots
+~~~
+
+The text file lists resource IDs, classes, visible text, and descriptions for
+selector calibration. A screenshot alone does not expose resource IDs. Paper
+buys and sells update only the simulated cash and position ledger.
 
 ### PREPARE
 

@@ -11,7 +11,7 @@ class FomoAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.packageName?.toString() != "family.fomo.app") return
-        AutomationCoordinator.onFomoUiChanged(rootInActiveWindow)
+        AutomationCoordinator.onFomoUiChanged(rootInActiveWindow, this)
     }
 
     override fun onInterrupt() = Unit

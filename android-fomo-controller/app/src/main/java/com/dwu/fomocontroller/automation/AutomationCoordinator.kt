@@ -1,5 +1,6 @@
 package com.dwu.fomocontroller.automation
 
+import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
@@ -15,6 +16,7 @@ import java.util.ArrayDeque
 object AutomationCoordinator {
     private const val OPEN_TIMEOUT_MS = 8_000L
     private const val STEP_TIMEOUT_MS = 8_000L
+    private const val SCREENSHOT_TIMEOUT_MS = 15_000L
 
     private val handler = Handler(Looper.getMainLooper())
     private val queue = ArrayDeque<String>()
@@ -47,13 +49,13 @@ object AutomationCoordinator {
     }
 
     @Synchronized
-    fun onFomoUiChanged(root: AccessibilityNodeInfo?) {
+    fun onFomoUiChanged(root: AccessibilityNodeInfo?, service: AccessibilityService) {
         ensureInitialized()
         val key = activeKey ?: return
         val event = db.get(key) ?: return
         val now = System.currentTimeMillis()
 
-        if (now > deadline) {
+        if (now > deadline && activeStage != "SCREENSHOT_PENDING") {
             failLocked(key, "UI_TIMEOUT", "Timed out during $activeStage")
             return
         }
@@ -68,12 +70,20 @@ object AutomationCoordinator {
                 if (!AccessibilityTools.containsText(root, expectedCoin)) return
 
                 if (prefs.mode == ControllerMode.DRY_RUN) {
-                    val ledgerResult = AdaptiveHybridEngine.recordPaperExecution(key)
-                    if (!ledgerResult.startsWith("Recorded ")) {
-                        failLocked(key, "PAPER_LEDGER_FAILED", ledgerResult)
-                        return
+                    activeStage = "SCREENSHOT_PENDING"
+                    deadline = now + SCREENSHOT_TIMEOUT_MS
+                    db.updateState(key, activeStage)
+                    handler.postDelayed({
+                        synchronized(this) {
+                            completePaperAfterScreenshot(key, "Screenshot timed out")
+                        }
+                    }, SCREENSHOT_TIMEOUT_MS)
+                    GoScreenshot.capture(service, root, key, event.action.orEmpty(),
+                        event.trader, event.coin) { result ->
+                        synchronized(this) {
+                            completePaperAfterScreenshot(key, result)
+                        }
                     }
-                    finishLocked(key, "DRY_RUN_VERIFIED")
                     return
                 }
 
@@ -204,12 +214,22 @@ object AutomationCoordinator {
     }
 
     @Synchronized
-    private fun finishLocked(key: String, state: String) {
-        db.updateState(key, state)
+    private fun finishLocked(key: String, state: String, detail: String? = null) {
+        db.updateState(key, state, detail)
         activeKey = null
         activeStage = "IDLE"
         deadline = 0L
         handler.post { synchronized(this) { startNextLocked() } }
+    }
+
+    private fun completePaperAfterScreenshot(key: String, result: String) {
+        if (activeKey != key || activeStage != "SCREENSHOT_PENDING") return
+        val ledgerResult = AdaptiveHybridEngine.recordPaperExecution(key)
+        if (!ledgerResult.startsWith("Recorded ")) {
+            failLocked(key, "PAPER_LEDGER_FAILED", "$ledgerResult; $result")
+        } else {
+            finishLocked(key, "DRY_RUN_VERIFIED", result)
+        }
     }
 
     @Synchronized
