@@ -21,11 +21,17 @@ class NotificationClearPolicyTest {
     }
 
     @Test
-    fun tradeStaysLiveOnlyWhileExactNotificationMayStillBeNeeded() {
+    fun selectedTradeStaysLiveUntilVerificationAndCaptureFinish() {
         val states = listOf(
             "ADAPTIVE_SELECTED",
             "QUEUED",
-            "OPENING"
+            "OPENING",
+            "VERIFYING",
+            "SCREENSHOT_PENDING",
+            "BUY_FIND_ENTRY",
+            "SELL_FIND_ENTRY",
+            "BUY_FILL_AMOUNT",
+            "SELL_FILL_AMOUNT"
         )
         states.forEach { state ->
             assertFalse(NotificationClearPolicy.isSafeToClear(state, true))
@@ -33,14 +39,14 @@ class NotificationClearPolicyTest {
     }
 
     @Test
-    fun durableTradeClearsAfterOpeningOrAnyTerminalOutcome() {
+    fun durableTradeClearsAfterAnyTerminalOutcome() {
         val states = listOf(
             null,
             "FILTERED",
             "ADAPTIVE_OBSERVED",
-            "VERIFYING",
             "OBSERVED",
             "DRY_RUN_VERIFIED",
+            "SCREENSHOT_FAILED",
             "PREPARED_BUY",
             "PREPARED_SELL",
             "PARSE_FAILED",

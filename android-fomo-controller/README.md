@@ -36,13 +36,13 @@ The implementation keeps the important behavior of the current Tasker workflow:
 - bought and sold notifications are parsed;
 - every non-trade Fomo notification is cleared immediately, including blank, thesis-only, group-summary, and unrelated notifications;
 - bought/sold notifications are cleared only after a matching raw recorder row confirms durable capture;
-- selected trades stay live only through the step that invokes their exact content intent, then clear immediately;
+- selected trades stay live through Fomo page verification and capture, then clear;
 - parse, model, expiration, opening, UI, timeout, and other failures remain preserved in the local event log but no longer accumulate in the Android tray;
 - the three-minute active-notification sweep is an exception-safe retry path rather than the primary clearing mechanism.
 
 Unlike the existing Tasker-to-Sheets path, execution does not wait for an HTTP request. The local SQLite database is the durable first write.
 
-The listener clears non-trade Fomo notifications as soon as they arrive. For bought/sold notifications, a successful insert into `recorded_notifications` is the durable-read confirmation. Notifications rejected by parsing or the model, filtered trades, OBSERVE-mode trades, expired work, and terminal automation failures clear immediately after that confirmation. A selected trade remains active only while its exact notification `contentIntent` is still needed; it is cleared immediately after the intent is invoked. The listener also runs an exception-safe recovery sweep when it connects and every three minutes afterward.
+The listener clears non-trade Fomo notifications as soon as they arrive. For bought/sold notifications, a successful insert into `recorded_notifications` is the durable-read confirmation. Notifications rejected by parsing or the model, filtered trades, OBSERVE-mode trades, expired work, and terminal automation failures clear immediately after that confirmation. A selected trade remains active through Fomo page verification and capture, then clears. The listener also runs an exception-safe recovery sweep when it connects and every three minutes afterward.
 
 ## Raw local buy/sell recorder
 
@@ -239,8 +239,8 @@ This is the recommended validation mode.
 
 Each selected buy or sell gets one capture after the expected coin is visible.
 If opening or verification fails, there is no verified Fomo page to capture.
-Screenshot errors are recorded on the event and do not prevent the simulated
-paper execution. PREPARE selector calibration is not needed for this capture.
+Screenshot errors are recorded as `SCREENSHOT_FAILED` and do not create a paper
+position. PREPARE selector calibration is not needed for this capture.
 Images and matching accessibility hierarchy text files are stored in the
 app-specific \`Pictures/go_screenshots\` folder. The dashboard event detail
 shows the image path or capture error. Copy the folder from an attached device:
@@ -252,6 +252,32 @@ adb -s ZY22L495GB pull /sdcard/Android/data/com.dwu.fomocontroller/files/Picture
 The text file lists resource IDs, classes, visible text, and descriptions for
 selector calibration. A screenshot alone does not expose resource IDs. Paper
 buys and sells update only the simulated cash and position ledger.
+
+### Diagnose a dry run on a device
+
+Install this build, select `DRY_RUN` in the controller, and enable both its
+notification listener and accessibility service. Wait for a genuine Fomo buy
+notification. Tap **Refresh events** in the controller. `FILTERED` and its
+`reason=` explain a model rejection; `INTENT_UNAVAILABLE` identifies a missing
+or canceled content intent; `UI_TIMEOUT` means Fomo did not show the expected
+coin within eight seconds; `SCREENSHOT_FAILED` records the capture error.
+`DRY_RUN_VERIFIED` includes the saved image path. A sell is selected only after
+a matching dry-run buy created a paper position for that trader and coin.
+
+For platform launch diagnostics, collect the device log soon after a genuine
+selected notification:
+
+~~~powershell
+adb -s ZY22L495GB logcat -d -v time | Select-String 'FomoNotificationClear|Background activity|ActivityTaskManager|com.dwu.fomocontroller|family.fomo.app'
+~~~
+
+An `adb shell cmd notification post` notification belongs to the Android shell
+package. It tests a manual tap but cannot reach this listener's Fomo package
+filter, model, paper ledger, or screenshot path. Launching Fomo's activity with
+`am start` likewise does not test its notification deep link. On Android 14+,
+the controller opts in when sending Fomo's content intent, but the creator's
+restrictions or the device's background launch policy can still prevent an
+unattended launch. Inspect `UI_TIMEOUT` and logcat in that case.
 
 ### PREPARE
 
