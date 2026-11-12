@@ -33,10 +33,10 @@ object ChampionStore {
             bundledForecast.trainedThrough
         )
         val root = File(context.filesDir, "models").apply { mkdirs() }
-        promoteStaged(root)
+        promoteStaged(root, bundledForecast.schemaVersion)
 
         for ((name, directory) in listOf("active" to File(root, "active"), "previous" to File(root, "previous"))) {
-            runCatching { loadDirectory(directory) }
+            runCatching { loadDirectory(directory, bundledForecast.schemaVersion) }
                 .onSuccess { return it.copy(source = name) }
                 .onFailure { error ->
                     if (directory.exists()) Log.e(TAG, "Rejected $name champion: ${error.message}", error)
@@ -45,10 +45,10 @@ object ChampionStore {
         return ActiveChampions(bundledForecast, bundledPolicy, "bundled")
     }
 
-    private fun promoteStaged(root: File) {
+    private fun promoteStaged(root: File, expectedSchema: String) {
         val staging = File(root, "staging")
         if (!File(staging, MANIFEST).isFile) return
-        runCatching { loadDirectory(staging) }
+        runCatching { loadDirectory(staging, expectedSchema) }
             .onFailure { error ->
                 Log.e(TAG, "Staged champions failed validation and were not activated", error)
                 return
@@ -70,7 +70,7 @@ object ChampionStore {
         }
     }
 
-    private fun loadDirectory(directory: File): ActiveChampions {
+    private fun loadDirectory(directory: File, expectedSchema: String): ActiveChampions {
         require(directory.isDirectory) { "Champion directory is missing" }
         val manifest = JSONObject(File(directory, MANIFEST).readText())
         require(manifest.getString("schemaVersion") == MANIFEST_SCHEMA) {
@@ -86,6 +86,7 @@ object ChampionStore {
             AdaptiveHybridModel.fromJsonText(forecastBytes.toString(Charsets.UTF_8))
         }
         forecast.validateParity()
+        require(forecast.schemaVersion == expectedSchema) { "Champion target contract differs from bundled strategy" }
         require(forecast.modelId == forecastEntry.getString("modelId")) {
             "Forecast ID does not match manifest"
         }
@@ -93,6 +94,9 @@ object ChampionStore {
             GZIPInputStream(policyBytes.inputStream()).bufferedReader().use { it.readText() }
         } else policyBytes.toString(Charsets.UTF_8)
         val policy = PolicyArtifact.fromJson(policyText)
+        forecast.target?.let { target ->
+            require(policy.config.slippagePerSide == target.slippage) { "Policy and 2x target slippage differ" }
+        }
         require(policy.policyModelId == policyEntry.getString("policyModelId")) {
             "Policy ID does not match manifest"
         }

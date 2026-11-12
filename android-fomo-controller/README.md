@@ -2,6 +2,26 @@
 
 Prototype Android companion app for running the Fomo notification workflow mostly inside an Android emulator.
 
+## Current strategy: boosted trees targeting net 2×
+
+The strategy now predicts the probability of an estimated **net return multiple
+≥2**, rather than any positive exit, using trader/token identity and 26 causal
+numeric features from raw notification history. Android replays the recorder on
+startup to construct the same inputs as Python. Buys must pass an absolute
+probability cutoff and a predicted net multiple ≥2 at the proposed size, plus
+the existing sizing rules.
+
+The public bundled `notification_net_2x.json` is a **synthetic, untrained
+bootstrap that cannot authorize buys**. Trained parameters and evaluation data
+stay local. Train a candidate and stage it privately to use data-dependent
+predictions. The trainer does not install models or place orders.
+
+See [NET_2X_STRATEGY.md](docs/NET_2X_STRATEGY.md) for the field audit, target math,
+date splits, evaluation workflow, and retraining command. Existing v2 artifacts
+remain for compatibility tests, but an old winner model cannot override the new
+strategy through staging. The legacy recursive-learning commands below apply
+only to v2; use the raw-notification trainer for the current strategy.
+
 ## What this branch implements
 
 - Watches Android notifications with NotificationListenerService.
@@ -10,7 +30,7 @@ Prototype Android companion app for running the Fomo notification workflow mostl
 - Parses \`bought\`, \`sold\`, and thesis-only notifications.
 - Appends every Fomo bought/sold notification to a raw local recorder before parsing, filtering, or UI automation.
 - Preserves Android notification key, ID, tag, post time, capture time, title, normal text, expanded text, selected text, channel/group/category metadata, content-intent presence, and action count.
-- Runs the fitted Adaptive Hybrid v2 classifier, ROI regressor, confidence rank,
+- Runs the fitted notification net-2x HGB classifier, ROI regressor, confidence rank,
   fee gate, sizing ladder, and NORMAL/CAUTION/DEFENSIVE controller locally.
 - Records every complete de-duplicated BUY as unbiased recursive-learning evidence,
   then resolves it only on the first later matching SELL.
