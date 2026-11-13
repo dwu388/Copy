@@ -63,7 +63,7 @@ object AdaptiveHybridEngine {
         db = StrategyDatabase(app)
         prefs = AppPreferences(app)
         rawDb = EventDatabase(app)
-        featureHistory = NotificationFeatures(model.target?.copyRatio ?: 20.0, model.target?.slippage ?: 0.0)
+        featureHistory = NotificationFeatures(model.target?.copyRatio ?: 10.0, model.target?.slippage ?: 0.0)
         db.transaction(db::cancelOrphanedPlanned)
         initialized = true
     }

@@ -5,7 +5,7 @@ import java.util.Locale
 import kotlin.math.*
 
 /** Mirrors learning.notification_features. Only strictly earlier captures inform a BUY. */
-class NotificationFeatures(private val ratio: Double = 20.0, private val slippage: Double = 0.0) {
+class NotificationFeatures(private val ratio: Double = 10.0, private val slippage: Double = 0.0) {
     private data class Event(
         val action: String, val trader: String, val token: String, val mc: Double,
         val amount: Double, val post: Long, val captured: Long

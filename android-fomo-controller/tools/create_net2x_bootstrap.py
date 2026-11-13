@@ -17,7 +17,7 @@ def main():
     config = copy.deepcopy(read_payload(Path("app/src/main/assets/adaptive_hybrid_v2.json.gz"))["config"])
     config["name"] = "net2x"
     for mode in config["modes"].values():
-        mode["ratio_floor"] = max(20, mode["ratio_floor"])
+        mode["ratio_floor"] = max(10, mode["ratio_floor"])
     features = {name: 0.0 for name in NUMERIC_FEATURES}
     features.update(log_market_cap=math.log1p(100), log_source_buy_usd=math.log1p(100),
                     log_source_to_cap=math.log1p(1))
@@ -31,7 +31,7 @@ def main():
         featureHistoryContract="notification_history_v1", featureContract=["trader", "token", *NUMERIC_FEATURES],
         matchingRule="first available later SELL with same normalized trader and ticker; proxy only",
         target=dict(name="net_return_multiple_at_first_source_sell", minimumNetMultiple=2.0,
-                    copyRatio=20.0, slippagePerSide=0.0, feeDiscount=0.0, probabilityThreshold=1.0,
+                    copyRatio=10.0, slippagePerSide=0.0, feeDiscount=0.0, probabilityThreshold=1.0,
                     minimumPredictedNetMultiple=2.0),
         config=config, excludedTraders=[], confidenceReference=[1.0], roiUncertaintyScale=1.0,
         classifier=ensemble | dict(baseline=-100.0), regressor=ensemble | dict(baseline=-1.0),

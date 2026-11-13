@@ -18,11 +18,19 @@ net multiple = max(0, estimated proceeds - fee(estimated proceeds)) / (P + fee(P
 target_2x = net multiple >= 2
 ```
 
-The bundled assumptions use ratio 20, standard fees and zero slippage, matching
+The bundled assumptions use ratio 10, standard fees and zero slippage, matching
 the previous policy's slippage assumption. A gross doubling generally fails the
 net target after fees. A 2× return means doubling the original all-in investment
 (100% profit), not a 200% profit / 3× return. These are modeled assumptions, not
 verified venue fees or measured execution costs.
+
+The starting NORMAL ratio is **1:10**: a source $1,000 buy proposes a $100 copy
+before fees and policy constraints. All persisted equity stages use this same
+base ratio. CAUTION and DEFENSIVE retain their 1:20 and 1:25 minimum ratios, and
+the sizing ladder may reduce an order further. Training labels and prior-outcome
+features use the configured reference ratio (default 10). Rebuild/retrain any
+old 1:20 candidate before interpreting it as a 1:10 forecast; changing size alone
+does not relabel its training history or recalibrate probabilities.
 
 The CSV does **not** contain token quantities, contract addresses, copied fills,
 transaction fees, actual exit proceeds or supply changes. It cannot establish

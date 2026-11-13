@@ -144,7 +144,7 @@ def main():
     parser.add_argument("--output-dir", type=Path, default=Path("local_learning_state/net2x"))
     parser.add_argument("--train-before", default="2026-10-27", help="Exclusive UTC label cutoff")
     parser.add_argument("--test-start", default="2026-11-03", help="Untouched UTC entry cutoff")
-    parser.add_argument("--ratio", type=float, default=20)
+    parser.add_argument("--ratio", type=float, default=10)
     parser.add_argument("--slippage", type=float, default=0.0, help="Fraction per side")
     parser.add_argument("--bootstrap-forecast", type=Path, default=Path("app/src/main/assets/adaptive_hybrid_v2.json.gz"))
     parser.add_argument("--stage", action="store_true", help="Also create a private Android staging directory; does not install it")

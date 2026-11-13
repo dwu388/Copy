@@ -16,6 +16,15 @@ def event(i, action="bought", post=None, captured=None, mc=100, amount=1000, tra
 
 
 class Notification2xTest(unittest.TestCase):
+    def test_default_ratio_ten_changes_cost_adjusted_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "raw.csv"
+            pd.DataFrame([event(1), event(2, "sold", mc=204)]).to_csv(path, index=False)
+            default, _ = build_dataset(path)
+            twenty, _ = build_dataset(path, ratio=20)
+        self.assertEqual(1, default.target_2x.iloc[0])
+        self.assertEqual(0, twenty.target_2x.iloc[0])
+
     def dataset(self, rows):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "raw.csv"

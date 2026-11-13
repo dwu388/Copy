@@ -16,6 +16,12 @@ bootstrap that cannot authorize buys**. Trained parameters and evaluation data
 stay local. Train a candidate and stage it privately to use data-dependent
 predictions. The trainer does not install models or place orders.
 
+The default starting ratio is **1:10** ($1,000 source buy → $100 proposed copy,
+before fees). CAUTION/DEFENSIVE floors remain 1:20/1:25, and portfolio constraints
+can reduce the order further. Training, history features, and the bundled target
+share the 1:10 reference. Older 1:20 candidates require retraining and cannot be
+silently activated under the changed reference ratio.
+
 See [NET_2X_STRATEGY.md](docs/NET_2X_STRATEGY.md) for the field audit, target math,
 date splits, evaluation workflow, and retraining command. Existing v2 artifacts
 remain for compatibility tests, but an old winner model cannot override the new

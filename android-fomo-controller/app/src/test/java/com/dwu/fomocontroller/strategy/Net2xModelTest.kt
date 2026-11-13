@@ -43,6 +43,8 @@ class Net2xModelTest {
         assertFalse(target.qualifies(HybridScore(false, .4, 2.0, .99), 50.0, 0.0))
         assertFalse(target.qualifies(HybridScore(false, .9, 1.2, .99), 1.0, 0.0))
         assertTrue(target.qualifies(HybridScore(false, .9, 1.2, .99), 50.0, 0.0))
+        assertTrue(target.qualifies(HybridScore(false, .9, 1.04, .99), 100.0, 0.0))
+        assertFalse(target.qualifies(HybridScore(false, .9, 1.04, .99), 50.0, 0.0))
     }
 
     @Test fun replayFeaturesMatchPythonForEverySyntheticEntry() {

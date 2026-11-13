@@ -34,7 +34,7 @@ def net_multiple(gross_multiple: float, principal: float, slippage: float = 0.0,
 
 
 class FeatureHistory:
-    def __init__(self, ratio: float = 20, slippage: float = 0.0):
+    def __init__(self, ratio: float = 10, slippage: float = 0.0):
         self.ratio, self.slippage = ratio, slippage
         self.tokens: dict[str, list[dict]] = defaultdict(list)
         self.traders: dict[str, list[dict]] = defaultdict(list)
@@ -136,7 +136,7 @@ def load_notifications(path: Path) -> tuple[pd.DataFrame, dict]:
     return clean, dict(source_rows=len(raw), invalid_rows=int((~valid).sum()))
 
 
-def build_dataset(path: Path, ratio: float = 20, slippage: float = 0.0) -> tuple[pd.DataFrame, dict]:
+def build_dataset(path: Path, ratio: float = 10, slippage: float = 0.0) -> tuple[pd.DataFrame, dict]:
     if not math.isfinite(ratio) or ratio <= 0 or not 0 <= slippage <= 0.25:
         raise ValueError("ratio must be positive; slippage must be in [0, .25]")
     clean, summary = load_notifications(path)
