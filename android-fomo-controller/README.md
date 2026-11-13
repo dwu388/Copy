@@ -2,6 +2,12 @@
 
 Prototype Android companion app for running the Fomo notification workflow mostly inside an Android emulator.
 
+Paper positions now have a **24-hour maximum holding period** in DRY_RUN. A
+recent matching notification supplies a market-cap valuation; without a fresh
+usable quote the paper position is closed at zero proceeds with an explicit
+assumed-loss reason. Existing paper positions are included, with no wallet reset.
+See [PAPER_EXPIRY.md](docs/PAPER_EXPIRY.md) for timing, valuation and audit details.
+
 ## What this branch implements
 
 - Watches Android notifications with NotificationListenerService.

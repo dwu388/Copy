@@ -6,6 +6,8 @@ import com.dwu.fomocontroller.config.AppPreferences
 import com.dwu.fomocontroller.data.StrategyDatabase
 import com.dwu.fomocontroller.data.StrategyPlan
 import com.dwu.fomocontroller.data.StrategyStatus
+import com.dwu.fomocontroller.data.EventDatabase
+import com.dwu.fomocontroller.model.ControllerMode
 import java.io.File
 import kotlin.math.max
 
@@ -44,6 +46,7 @@ object AdaptiveHybridEngine {
     private lateinit var championSource: String
     private lateinit var db: StrategyDatabase
     private lateinit var prefs: AppPreferences
+    private lateinit var rawDb: EventDatabase
     @Volatile private var initialized = false
 
     @Synchronized
@@ -56,8 +59,10 @@ object AdaptiveHybridEngine {
         championSource = champions.source
         db = StrategyDatabase(app)
         prefs = AppPreferences(app)
+        rawDb = EventDatabase(app)
         db.transaction(db::cancelOrphanedPlanned)
         initialized = true
+        expirePaperPositions()
     }
 
     @Synchronized
@@ -73,6 +78,7 @@ object AdaptiveHybridEngine {
     ): AndroidStrategyDecision {
         ensureInitialized()
         require(action == "bought" || action == "sold")
+        expirePaperPositions()
         return if (action == "bought") {
             evaluateBuy(notificationKey, trader, token, marketCap, sourceAmount, eventTimeMs, reserveForExecution)
         } else {
@@ -245,7 +251,47 @@ object AdaptiveHybridEngine {
 
     fun status(): StrategyStatus {
         ensureInitialized()
+        expirePaperPositions()
         return db.status()
+    }
+
+    @Synchronized
+    fun expirePaperPositions(now: Long = System.currentTimeMillis()): Int {
+        ensureInitialized()
+        if (prefs.mode != ControllerMode.DRY_RUN) return 0
+        return db.transaction { sql ->
+            val overdue = db.overduePaperPositions(sql, now - PaperExpiry.MAX_HOLD_MS)
+            if (overdue.isEmpty()) return@transaction 0
+            val state = db.loadState(sql, now)
+            for (positions in overdue.groupBy { it.trader.lowercase(java.util.Locale.ROOT) to
+                    it.token.lowercase(java.util.Locale.ROOT) }.values) {
+                val first = positions.first()
+                val quote = rawDb.freshMarketCap(first.trader, first.token, now, PaperExpiry.QUOTE_MAX_AGE_MS)
+                val gross = positions.sumOf { PaperExpiry.gross(it.principal, it.entryMarketCap,
+                    quote, policyArtifact.config.slippagePerSide) }
+                val fee = AdaptiveHybridPolicy.orderFee(gross, prefs.feeDiscount)
+                val principal = positions.sumOf { it.principal }
+                val key = "paper-expiry-24h:" + positions.joinToString(",") { it.id.toString() }
+                db.cancelPlansForExpiry(sql, positions)
+                val plan = StrategyPlan(key, "sold", first.trader, first.token, quote ?: 0.0,
+                    principal, gross, fee, "PAPER_EXECUTED", now)
+                recordDecision(sql, key, "sold", "EXECUTE", if (quote == null)
+                    "TIMEOUT_24H_FULL_LOSS_NO_FRESH_QUOTE" else "TIMEOUT_24H_FRESH_NOTIFICATION_MARK",
+                    state.mode, first.trader, first.token, quote ?: 0.0, 0.0, now,
+                    null, null, null, "PAPER_EXECUTED", copyAmount = gross, fee = fee)
+                db.addPlan(sql, plan)
+                db.linkPlanPositions(sql, key, positions)
+                db.closePositions(sql, positions, key, now)
+                state.cash += max(0.0, gross - fee)
+                state.openCost = max(0.0, state.openCost - principal)
+                state.exitsSinceModeChange++
+            }
+            AdaptiveHybridPolicy.updateMode(state, policyArtifact.config)
+            AdaptiveHybridPolicy.updateStage(state, policyArtifact.config, afterExit = true)
+            state.peakEquity = max(state.peakEquity, state.equity())
+            db.saveState(sql, state)
+            overdue.size
+        }
     }
 
     fun exportLearningCsv(destination: File): Int {
