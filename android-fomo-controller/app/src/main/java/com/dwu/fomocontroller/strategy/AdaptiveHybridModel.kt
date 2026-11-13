@@ -11,7 +11,6 @@ import kotlin.math.ln1p
 
 data class HybridScore(
     val excluded: Boolean,
-    /** Legacy name: for a net-2x artifact this means P(net return multiple >= 2). */
     val probabilityProfitableExit: Double,
     val predictedRoi: Double,
     val confidenceRank: Double
@@ -23,9 +22,7 @@ data class ModelParityFixture(
     val sourceBuyUsd: Double,
     val probability: Double,
     val predictedRoi: Double,
-    val confidenceRank: Double,
-    val token: String = "",
-    val features: Map<String, Double> = emptyMap()
+    val confidenceRank: Double
 )
 
 /** Exact JVM evaluator for the fitted sklearn HistGradientBoosting bundle. */
@@ -33,11 +30,9 @@ class AdaptiveHybridModel private constructor(
     val version: String,
     val schemaVersion: String,
     val modelId: String,
-    val bootstrapOnly: Boolean,
     val parentModelId: String?,
     val trainedThrough: String,
     val matchingRule: String,
-    val target: Net2xTarget?,
     val roiUncertaintyScale: Double,
     /** Legacy generation-0 bootstrap only. Active policy is loaded separately. */
     val config: StrategyConfig?,
@@ -48,21 +43,15 @@ class AdaptiveHybridModel private constructor(
     private val recentAdapter: RecentAdapter?,
     val parityFixtures: List<ModelParityFixture>
 ) {
-    fun score(trader: String, marketCap: Double, sourceBuyUsd: Double,
-              token: String = "", features: Map<String, Double> = emptyMap()): HybridScore {
+    fun score(trader: String, marketCap: Double, sourceBuyUsd: Double): HybridScore {
         require(marketCap.isFinite() && marketCap > 0.0) { "marketCap must be positive and finite" }
         require(sourceBuyUsd.isFinite() && sourceBuyUsd > 0.0) { "sourceBuyUsd must be positive and finite" }
         if (trader.lowercase(Locale.ROOT) in excludedTraders) {
             return HybridScore(true, Double.NaN, Double.NaN, 0.0)
         }
 
-        if (target != null) {
-            require(token.isNotBlank() && NotificationFeatures.NAMES.all { features[it]?.isFinite() == true }) {
-                "Net-2x scoring requires complete causal notification features"
-            }
-        }
-        val stableProbability = sigmoid(classifier.predict(trader, marketCap, sourceBuyUsd, token, features))
-        val stableRoi = regressor.predict(trader, marketCap, sourceBuyUsd, token, features)
+        val stableProbability = sigmoid(classifier.predict(trader, marketCap, sourceBuyUsd))
+        val stableRoi = regressor.predict(trader, marketCap, sourceBuyUsd)
         val probability = recentAdapter?.let { adapter ->
             (1.0 - adapter.probabilityWeight) * stableProbability +
                 adapter.probabilityWeight * sigmoid(adapter.classifier.predict(trader, marketCap, sourceBuyUsd))
@@ -108,33 +97,21 @@ class AdaptiveHybridModel private constructor(
         private val numericMean: DoubleArray,
         private val numericScale: DoubleArray,
         private val baseline: Double,
-        private val trees: List<Array<Node>>,
-        private val categoricalFeatures: List<Pair<String, List<String>>> = emptyList(),
-        private val numericFeatures: List<String> = emptyList()
+        private val trees: List<Array<Node>>
     ) {
         private val traderIndex = traderCategories.withIndex().associate { it.value to it.index }
         private val categoryCount = traderCategories.size
 
-        fun predict(trader: String, marketCap: Double, sourceBuyUsd: Double,
-                    token: String = "", features: Map<String, Double> = emptyMap()): Double {
+        fun predict(trader: String, marketCap: Double, sourceBuyUsd: Double): Double {
             val activeTrader = traderIndex[trader]
-            val modern = categoricalFeatures.isNotEmpty()
-            val vector = if (modern) buildList {
-                for ((name, categories) in categoricalFeatures) {
-                    val value = (if (name == "trader") trader else token).trim().lowercase(Locale.ROOT)
-                    addAll(categories.map { if (it == value) 1.0 else 0.0 })
-                }
-                addAll(numericFeatures.map { features[it] ?: error("Missing feature $it") })
-            } else emptyList()
-            val logMarketCap = if (modern) 0.0 else (ln1p(marketCap) - numericMean[0]) / numericScale[0]
-            val logSourceUsd = if (modern) 0.0 else (ln1p(sourceBuyUsd) - numericMean[1]) / numericScale[1]
+            val logMarketCap = (ln1p(marketCap) - numericMean[0]) / numericScale[0]
+            val logSourceUsd = (ln1p(sourceBuyUsd) - numericMean[1]) / numericScale[1]
             var raw = baseline
             for (tree in trees) {
                 var index = 0
                 while (!tree[index].leaf) {
                     val node = tree[index]
                     val value = when {
-                        modern -> vector[node.featureIndex]
                         node.featureIndex < categoryCount ->
                             if (node.featureIndex == activeTrader) 1.0 else 0.0
                         node.featureIndex == categoryCount -> logMarketCap
@@ -173,7 +150,7 @@ class AdaptiveHybridModel private constructor(
             "Invalid ROI uncertainty scale"
         }
         for (fixture in parityFixtures) {
-            val actual = score(fixture.trader, fixture.marketCap, fixture.sourceBuyUsd, fixture.token, fixture.features)
+            val actual = score(fixture.trader, fixture.marketCap, fixture.sourceBuyUsd)
             if (actual.excluded) continue
             require(kotlin.math.abs(actual.probabilityProfitableExit - fixture.probability) <= tolerance) {
                 "Classifier parity failed for ${fixture.trader}"
@@ -188,9 +165,11 @@ class AdaptiveHybridModel private constructor(
     }
 
     companion object {
-        // Public bootstrap is plain, reviewable JSON with synthetic constants.
-        // Private trained champions may still use gzip in internal model staging.
-        private const val ASSET = "notification_net_2x.json"
+        // AAPT removes the .gz suffix from gzip-compressed assets in the APK.
+        // The repository/source fixture remains .json.gz and is loaded with
+        // fromGzip() by JVM tests; Android's AssetManager exposes the packaged
+        // file as adaptive_hybrid_v2.json and transparently decompresses it.
+        private const val ASSET = "adaptive_hybrid_v2.json"
 
         fun fromAssets(context: Context): AdaptiveHybridModel {
             val root = context.assets.open(ASSET).bufferedReader(Charsets.UTF_8).use { reader ->
@@ -217,11 +196,10 @@ class AdaptiveHybridModel private constructor(
                 "schemaVersion",
                 if (version == "adaptive_hybrid_v2") "adaptive_hybrid_hgb_v1" else ""
             )
-            require(schemaVersion in setOf("adaptive_hybrid_hgb_v1", "copy_notification_hgb_2x_v1")) {
+            require(schemaVersion == "adaptive_hybrid_hgb_v1") {
                 "Unsupported forecast schema $schemaVersion"
             }
             val adapter = root.optJSONObject("recentAdapter")?.let { json ->
-                require(schemaVersion == "adaptive_hybrid_hgb_v1") { "2x adapters require a matching target contract" }
                 val probabilityWeight = json.getDouble("probabilityWeight")
                 val roiWeight = json.getDouble("roiWeight")
                 require(probabilityWeight in 0.0..0.35 && roiWeight in 0.0..0.35) {
@@ -238,21 +216,16 @@ class AdaptiveHybridModel private constructor(
                 version = version.ifBlank { schemaVersion },
                 schemaVersion = schemaVersion,
                 modelId = root.optString("modelId", version.ifBlank { "adaptive_hybrid_v2" }),
-                bootstrapOnly = root.optBoolean("bootstrapOnly", false),
                 parentModelId = root.optString("parentModelId").takeIf { it.isNotBlank() },
                 trainedThrough = root.getString("trainedThrough"),
                 matchingRule = root.getString("matchingRule"),
-                target = if (schemaVersion == "copy_notification_hgb_2x_v1") {
-                    require(root.getString("featureHistoryContract") == "notification_history_v1")
-                    Net2xTarget.fromJson(root.getJSONObject("target"))
-                } else null,
                 roiUncertaintyScale = root.getDouble("roiUncertaintyScale"),
                 config = root.optJSONObject("config")?.let(StrategyConfig::fromJson),
                 excludedTraders = root.getJSONArray("excludedTraders").strings()
                     .map { it.lowercase(Locale.ROOT) }.toSet(),
                 confidenceReference = root.getJSONArray("confidenceReference").doubles(),
-                classifier = parseEnsemble(root.getJSONObject("classifier"), schemaVersion == "copy_notification_hgb_2x_v1"),
-                regressor = parseEnsemble(root.getJSONObject("regressor"), schemaVersion == "copy_notification_hgb_2x_v1"),
+                classifier = parseEnsemble(root.getJSONObject("classifier")),
+                regressor = parseEnsemble(root.getJSONObject("regressor")),
                 recentAdapter = adapter,
                 parityFixtures = root.getJSONArray("fixtures").objects().map { fixture ->
                     ModelParityFixture(
@@ -261,22 +234,13 @@ class AdaptiveHybridModel private constructor(
                         sourceBuyUsd = fixture.getDouble("sourceBuyUsd"),
                         probability = fixture.getDouble("probability"),
                         predictedRoi = fixture.getDouble("predictedRoi"),
-                        confidenceRank = fixture.getDouble("confidenceRank"),
-                        token = fixture.optString("token", ""),
-                        features = fixture.optJSONObject("features")?.let { json ->
-                            json.keys().asSequence().associateWith { json.getDouble(it) }
-                        } ?: emptyMap()
+                        confidenceRank = fixture.getDouble("confidenceRank")
                     )
                 }
             )
         }
 
-        private fun parseEnsemble(json: JSONObject, modern: Boolean = false): Ensemble {
-            if (modern) {
-                require(json.getJSONArray("numericFeatures").strings() == NotificationFeatures.NAMES)
-                require(json.getJSONArray("categoricalFeatures").objects().map { it.getString("name") } ==
-                    listOf("trader", "token")) { "Unsupported categorical feature contract" }
-            }
+        private fun parseEnsemble(json: JSONObject): Ensemble {
             val treesJson = json.getJSONArray("trees")
             val trees = ArrayList<Array<Node>>(treesJson.length())
             for (i in 0 until treesJson.length()) {
@@ -296,47 +260,16 @@ class AdaptiveHybridModel private constructor(
                 trees += nodes
             }
             return Ensemble(
-                traderCategories = json.optJSONArray("traderCategories")?.strings() ?: emptyList(),
-                numericMean = json.optJSONArray("numericMean")?.doubles() ?: doubleArrayOf(),
-                numericScale = json.optJSONArray("numericScale")?.doubles() ?: doubleArrayOf(),
+                traderCategories = json.getJSONArray("traderCategories").strings(),
+                numericMean = json.getJSONArray("numericMean").doubles(),
+                numericScale = json.getJSONArray("numericScale").doubles(),
                 baseline = json.getDouble("baseline"),
-                trees = trees,
-                categoricalFeatures = json.optJSONArray("categoricalFeatures")?.objects()?.map { feature ->
-                    val name = feature.getString("name")
-                    require(name in setOf("trader", "token")) { "Unknown categorical feature $name" }
-                    name to feature.getJSONArray("categories").strings()
-                } ?: emptyList(),
-                numericFeatures = json.optJSONArray("numericFeatures")?.strings()?.also { names ->
-                    require(names == NotificationFeatures.NAMES) { "Unsupported numeric feature contract" }
-                } ?: emptyList()
+                trees = trees
             )
         }
 
         private fun JSONArray.strings() = List(length()) { getString(it) }
         private fun JSONArray.doubles() = DoubleArray(length()) { getDouble(it) }
         private fun JSONArray.objects() = List(length()) { getJSONObject(it) }
-    }
-}
-
-/** Absolute probability and predicted net multiple gates supplement the sizing policy. */
-data class Net2xTarget(
-    val copyRatio: Double, val slippage: Double, val probabilityThreshold: Double
-) {
-    fun qualifies(score: HybridScore, principal: Double, feeDiscount: Double): Boolean =
-        score.probabilityProfitableExit.isFinite() && score.predictedRoi.isFinite() &&
-            score.probabilityProfitableExit >= probabilityThreshold &&
-            NotificationFeatures.netMultiple(1 + score.predictedRoi, principal, slippage, feeDiscount) >= 2.0
-
-    companion object {
-        fun fromJson(json: JSONObject): Net2xTarget {
-            require(json.getString("name") == "net_return_multiple_at_first_source_sell")
-            require(json.getDouble("minimumNetMultiple") == 2.0 &&
-                json.getDouble("minimumPredictedNetMultiple") == 2.0 && json.getDouble("feeDiscount") == 0.0)
-            return Net2xTarget(json.getDouble("copyRatio"), json.getDouble("slippagePerSide"),
-                json.getDouble("probabilityThreshold")).also {
-                require(it.copyRatio.isFinite() && it.copyRatio > 0 && it.slippage in 0.0..0.25 &&
-                    it.probabilityThreshold in 0.5..1.0) { "Invalid 2x target contract" }
-            }
-        }
     }
 }

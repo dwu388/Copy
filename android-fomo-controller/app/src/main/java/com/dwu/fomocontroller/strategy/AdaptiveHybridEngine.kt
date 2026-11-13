@@ -6,8 +6,6 @@ import com.dwu.fomocontroller.config.AppPreferences
 import com.dwu.fomocontroller.data.StrategyDatabase
 import com.dwu.fomocontroller.data.StrategyPlan
 import com.dwu.fomocontroller.data.StrategyStatus
-import com.dwu.fomocontroller.data.EventDatabase
-import com.dwu.fomocontroller.model.RecordedNotification
 import java.io.File
 import kotlin.math.max
 
@@ -22,12 +20,11 @@ data class AndroidStrategyDecision(
     val actualRatio: Double? = null
 ) {
     fun auditSummary(): String = buildString {
-        append("Notification net 2x: ")
+        append("Adaptive Hybrid v2: ")
         append(reason)
         append("; mode=")
         append(mode)
         confidenceRank?.let { append("; confidence=${"%.4f".format(java.util.Locale.US, it)}") }
-        probability?.let { append("; p_net_2x=${"%.4f".format(java.util.Locale.US, it)}") }
         predictedRoi?.let { append("; predicted_roi=${"%.4f".format(java.util.Locale.US, it)}") }
         actualRatio?.let { append("; ratio=1:${"%.0f".format(java.util.Locale.US, it)}") }
     }
@@ -47,9 +44,6 @@ object AdaptiveHybridEngine {
     private lateinit var championSource: String
     private lateinit var db: StrategyDatabase
     private lateinit var prefs: AppPreferences
-    private lateinit var rawDb: EventDatabase
-    private lateinit var featureHistory: NotificationFeatures
-    private var featureWatermark = 0L
     @Volatile private var initialized = false
 
     @Synchronized
@@ -62,8 +56,6 @@ object AdaptiveHybridEngine {
         championSource = champions.source
         db = StrategyDatabase(app)
         prefs = AppPreferences(app)
-        rawDb = EventDatabase(app)
-        featureHistory = NotificationFeatures(model.target?.copyRatio ?: 10.0, model.target?.slippage ?: 0.0)
         db.transaction(db::cancelOrphanedPlanned)
         initialized = true
     }
@@ -77,52 +69,28 @@ object AdaptiveHybridEngine {
         marketCap: Double,
         sourceAmount: Double,
         eventTimeMs: Long,
-        reserveForExecution: Boolean,
-        rawNotification: RecordedNotification? = null
+        reserveForExecution: Boolean
     ): AndroidStrategyDecision {
         ensureInitialized()
         require(action == "bought" || action == "sold")
-        val features = if (model.target != null) {
-            val raw = requireNotNull(rawNotification) { "Net-2x requires the captured notification" }
-            val rawId = requireNotNull(raw.eventId) { "Notification must be durably recorded first" }
-            require(rawId > featureWatermark) { "Notification feature replay already consumed this event" }
-            var result: Map<String, Double>? = null
-            for (event in rawDb.featureReplay(featureWatermark, rawId)) {
-                val current = featureHistory.consume(event)
-                if (event.eventId == raw.eventId) result = current
-                featureWatermark = maxOf(featureWatermark, requireNotNull(event.eventId))
-            }
-            result ?: emptyMap()
-        } else emptyMap()
-        val strategyTime = if (model.target != null) {
-            maxOf(rawNotification!!.postTime, rawNotification.capturedTime)
-        } else eventTimeMs
-        if (model.target != null && action == "bought" && features.isEmpty()) {
-            return db.transaction { sql ->
-                skipAndRecord(sql, notificationKey, action, "DUPLICATE_FEATURE_HISTORY", trader, token,
-                    marketCap, sourceAmount, strategyTime, null, null)
-            }
-        }
         return if (action == "bought") {
-            evaluateBuy(notificationKey, trader, token, marketCap, sourceAmount, strategyTime,
-                reserveForExecution, features)
+            evaluateBuy(notificationKey, trader, token, marketCap, sourceAmount, eventTimeMs, reserveForExecution)
         } else {
-            evaluateSell(notificationKey, trader, token, marketCap, sourceAmount, strategyTime, reserveForExecution)
+            evaluateSell(notificationKey, trader, token, marketCap, sourceAmount, eventTimeMs, reserveForExecution)
         }
     }
 
     private fun evaluateBuy(
         key: String, trader: String, token: String, marketCap: Double,
-        sourceAmount: Double, nowMs: Long, reserveForExecution: Boolean,
-        features: Map<String, Double>
+        sourceAmount: Double, nowMs: Long, reserveForExecution: Boolean
     ): AndroidStrategyDecision {
+        val score = model.score(trader, marketCap, sourceAmount)
         return db.transaction { sql ->
             val fingerprint = fingerprint("bought", trader, token, marketCap, sourceAmount)
             if (db.isDuplicate(sql, fingerprint, nowMs, DEDUPE_WINDOW_MS)) {
                 return@transaction skipAndRecord(sql, key, "bought", "DUPLICATE_3M", trader, token,
                     marketCap, sourceAmount, nowMs, null, null)
             }
-            val score = model.score(trader, marketCap, sourceAmount, token, features)
             db.recordSeen(sql, key, fingerprint, nowMs)
             var state = db.loadState(sql, nowMs)
             val config = policyArtifact.config
@@ -138,17 +106,6 @@ object AdaptiveHybridEngine {
             if (score.excluded) {
                 db.saveState(sql, state)
                 return@transaction skipAndRecord(sql, key, "bought", "EXCLUDED_TRADER", trader, token,
-                    marketCap, sourceAmount, nowMs, score, state.mode)
-            }
-            val target = model.target
-            if (model.bootstrapOnly) {
-                db.saveState(sql, state)
-                return@transaction skipAndRecord(sql, key, "bought", "NO_TRAINED_NET_2X_MODEL", trader, token,
-                    marketCap, sourceAmount, nowMs, score, state.mode)
-            }
-            if (target != null && !target.qualifies(score, sourceAmount / target.copyRatio, prefs.feeDiscount)) {
-                db.saveState(sql, state)
-                return@transaction skipAndRecord(sql, key, "bought", "NET_2X_TARGET_NOT_MET", trader, token,
                     marketCap, sourceAmount, nowMs, score, state.mode)
             }
             if (score.confidenceRank >= config.baseConfidenceThreshold) {
@@ -170,12 +127,6 @@ object AdaptiveHybridEngine {
                 reservedState, config, prefs.feeDiscount, model.roiUncertaintyScale,
                 exposure.byTrader, exposure.byToken, exposure.recentEntries
             )
-            // Actual policy sizing may differ from the label's reference ratio.
-            if (policy.execute && target != null && !target.qualifies(score, policy.copyUsd!!, prefs.feeDiscount)) {
-                db.saveState(sql, state)
-                return@transaction skipAndRecord(sql, key, "bought", "NET_2X_AFTER_SIZING_NOT_MET", trader, token,
-                    marketCap, sourceAmount, nowMs, score, state.mode)
-            }
             val intended = if (policy.reason == "MODE_CONFIDENCE") null else sourceAmount / policy.effectiveRatio
             recordDecision(sql, key, "bought", if (policy.execute) "EXECUTE" else "SKIP", policy.reason,
                 state.mode, trader, token, marketCap, sourceAmount, nowMs, score, policy, intended,
@@ -237,9 +188,7 @@ object AdaptiveHybridEngine {
         }
         val principal = positions.sumOf { it.principal }
         val gross = positions.sumOf { position ->
-            val slip = 1.0 - config.slippagePerSide
-            position.principal * (marketCap / position.entryMarketCap) * slip *
-                (if (model.target != null) slip else 1.0)
+            position.principal * (marketCap / position.entryMarketCap) * (1.0 - config.slippagePerSide)
         }.coerceAtLeast(0.0)
         val fee = AdaptiveHybridPolicy.orderFee(gross, prefs.feeDiscount)
         recordDecision(sql, key, "sold", "EXECUTE", "MATCHED_CONFIRMED_POSITION", state.mode,
@@ -311,7 +260,6 @@ object AdaptiveHybridEngine {
 
     fun modelDescription(): String {
         ensureInitialized()
-        if (model.bootstrapOnly) return "Net 2×: no trained model installed; BUY execution disabled"
         return "${model.modelId} + ${policyArtifact.policyModelId} " +
             "[$championSource], trained through ${model.trainedThrough}"
     }

@@ -236,8 +236,6 @@ def build_adapter_payload(
     adapter_weight: float = 0.30,
 ) -> dict[str, Any]:
     """Keep the stable trees frozen and learn only a capped recent-regime adapter."""
-    if champion.get("schemaVersion") != "adaptive_hybrid_hgb_v1":
-        raise ValueError("Legacy winner adapters cannot modify the net-2x strategy; use learning.train_2x")
     if not 0 < adapter_weight <= 0.35:
         raise ValueError("adapter_weight must be within the Android safety cap (0, 0.35]")
     cutoff = float(train["exit_time"].max()) - adapter_days * 86_400_000

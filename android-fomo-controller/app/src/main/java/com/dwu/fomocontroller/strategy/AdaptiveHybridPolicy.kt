@@ -160,9 +160,7 @@ data class PolicyDecision(
 
 object AdaptiveHybridPolicy {
     private val ratioLadder = doubleArrayOf(1000.0, 500.0, 250.0, 100.0, 75.0, 50.0, 40.0, 35.0, 30.0, 25.0, 20.0, 15.0, 10.0)
-    // Keep all three persisted stage indices valid, while starting at 1:10 and
-    // never increasing aggressiveness beyond it. Regime floors still reduce size.
-    private val promotionRatios = doubleArrayOf(10.0, 10.0, 10.0)
+    private val promotionRatios = doubleArrayOf(20.0, 15.0, 10.0)
     private val promotionFloors = doubleArrayOf(0.0, 2_000.0, 4_000.0)
 
     fun orderFee(orderValue: Double, feeDiscount: Double): Double =

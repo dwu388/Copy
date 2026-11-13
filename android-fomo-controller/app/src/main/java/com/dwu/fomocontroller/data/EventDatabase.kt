@@ -124,15 +124,6 @@ class EventDatabase(context: Context) :
         return writableDatabase.insertOrThrow("recorded_notifications", null, values)
     }
 
-    fun featureReplay(afterId: Long, throughId: Long): List<RecordedNotification> =
-        readableDatabase.rawQuery(
-            "SELECT * FROM recorded_notifications WHERE event_id > ? AND event_id <= ? " +
-                "ORDER BY MAX(post_time, captured_time), event_id",
-            arrayOf(afterId.toString(), throughId.toString())
-        ).use { cursor ->
-            buildList { while (cursor.moveToNext()) add(cursor.toRecordedNotification()) }
-        }
-
     fun recorderStats(): RecorderStats {
         readableDatabase.rawQuery(
             """
