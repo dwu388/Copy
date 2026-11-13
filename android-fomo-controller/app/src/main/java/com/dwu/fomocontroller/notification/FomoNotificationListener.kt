@@ -110,7 +110,7 @@ class FomoNotificationListener : NotificationListenerService() {
                     notificationActionCount = notification.actions?.size ?: 0
                 )
 
-                runCatching { db.recordNotification(raw) }
+                val rawEventId = runCatching { db.recordNotification(raw) }
                     .onFailure { error ->
                         Log.e(
                             TAG,
@@ -162,7 +162,8 @@ class FomoNotificationListener : NotificationListenerService() {
                         marketCap = marketCap,
                         sourceAmount = sourceAmount,
                         eventTimeMs = sbn.postTime,
-                        reserveForExecution = prefs.mode != ControllerMode.OBSERVE
+                        reserveForExecution = prefs.mode != ControllerMode.OBSERVE,
+                        rawNotification = raw.copy(eventId = rawEventId)
                     )
                 }.getOrElse { error ->
                     runCatching {
@@ -170,7 +171,7 @@ class FomoNotificationListener : NotificationListenerService() {
                             baseEvent(
                                 sbn, title, selectedText, "MODEL_FAILED",
                                 parsed.action, parsed.trader, parsed.coin, marketCap, sourceAmount
-                            ).copy(failureReason = "Adaptive Hybrid v2 failed closed: ${error.message}")
+                            ).copy(failureReason = "Notification net 2x failed closed: ${error.message}")
                         )
                     }.onFailure { dbError ->
                         Log.w(TAG, "Could not record model failure for ${sbn.key}", dbError)

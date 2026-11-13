@@ -91,7 +91,7 @@ class MainActivity : Activity() {
         }
         root.addView(modeSpinner)
 
-        root.addView(label("Adaptive Hybrid v2 fee schedule"))
+        root.addView(label("Net 2× strategy fee schedule"))
         feeSpinner = Spinner(this).apply {
             adapter = ArrayAdapter(
                 this@MainActivity,

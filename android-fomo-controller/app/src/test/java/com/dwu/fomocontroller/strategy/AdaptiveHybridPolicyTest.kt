@@ -6,6 +6,29 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AdaptiveHybridPolicyTest {
+    @Test
+    fun startsAtTenAcrossPersistedStagesAndKeepsRegimeFloors() {
+        val cfg = requireNotNull(model().config)
+        for (stage in 0..2) {
+            val decision = AdaptiveHybridPolicy.chooseBuy(
+                1_000_000L, "a", "test", 1_000.0, 2.0, .99,
+                RuntimeSnapshot(stageIndex = stage), cfg, 0.0, 0.0,
+                emptyMap(), emptyMap(), emptyList()
+            )
+            assertTrue(decision.execute)
+            assertEquals(10.0, decision.stageRatio, 0.0)
+            assertEquals(100.0, decision.copyUsd!!, 0.0)
+        }
+        for (mode in listOf("CAUTION", "DEFENSIVE")) {
+            val decision = AdaptiveHybridPolicy.chooseBuy(
+                1_000_000L, "a", "test", 1_000.0, 2.0, .99,
+                RuntimeSnapshot(mode = mode), cfg, 0.0, 0.0,
+                emptyMap(), emptyMap(), emptyList()
+            )
+            assertEquals(cfg.modes.getValue(mode).ratioFloor, decision.effectiveRatio, 0.0)
+        }
+    }
+
     private fun model(): AdaptiveHybridModel {
         val input = checkNotNull(javaClass.classLoader?.getResourceAsStream("adaptive_hybrid_v2.json.gz"))
         return input.use(AdaptiveHybridModel::fromGzip)
