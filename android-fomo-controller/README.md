@@ -16,6 +16,12 @@ bootstrap that cannot authorize buys**. Trained parameters and evaluation data
 stay local. Train a candidate and stage it privately to use data-dependent
 predictions. The trainer does not install models or place orders.
 
+Training now partitions the entire supplied resolved history automatically:
+80% training entries, 10% validation entries and the latest 10% for trials.
+Boundary-crossing labels are purged, so retained counts can differ from those
+percentages. No fixed October cutoff applies unless explicitly requested.
+Validation and trials remain excluded from fitting; unresolved buys stay unknown.
+
 The default starting ratio is **1:10** ($1,000 source buy → $100 proposed copy,
 before fees). CAUTION/DEFENSIVE floors remain 1:20/1:25, and portfolio constraints
 can reduce the order further. Training, history features, and the bundled target

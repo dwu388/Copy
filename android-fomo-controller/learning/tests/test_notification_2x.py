@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from learning.notification_features import FeatureHistory, NUMERIC_FEATURES, build_dataset, net_multiple
-from learning.train_2x import export, fit, predict_payload, split
+from learning.train_2x import export, fit, predict_payload, split, split_by_fraction
 
 
 def event(i, action="bought", post=None, captured=None, mc=100, amount=1000, trader="A", token="NA"):
@@ -16,6 +16,37 @@ def event(i, action="bought", post=None, captured=None, mc=100, amount=1000, tra
 
 
 class Notification2xTest(unittest.TestCase):
+    def test_fraction_split_uses_latest_history_and_purges_crossing_labels(self):
+        frame = pd.DataFrame(dict(opportunity_id=range(100), entry_time=np.arange(100)*10,
+                                  exit_time=np.arange(100)*10+1,
+                                  lifecycle_group_id=[f"g{i}" for i in range(100)]))
+        frame.loc[79, "exit_time"] = 805
+        frame.loc[89, "exit_time"] = 905
+        train, validation, trial, contract = split_by_fraction(frame)
+        self.assertEqual(79, len(train))
+        self.assertEqual(9, len(validation))
+        self.assertEqual(10, len(trial))
+        self.assertEqual(2, contract["purged_boundary_rows"])
+        self.assertLess(train.exit_time.max(), validation.entry_time.min())
+        self.assertLess(validation.exit_time.max(), trial.entry_time.min())
+        self.assertEqual(990, trial.entry_time.max())
+
+    def test_fraction_split_keeps_equal_time_entries_together(self):
+        frame = pd.DataFrame(dict(opportunity_id=range(100), entry_time=np.arange(100)*10,
+                                  exit_time=np.arange(100)*10+1,
+                                  lifecycle_group_id=[f"g{i}" for i in range(100)]))
+        frame.loc[79, "entry_time"] = 800
+        frame.loc[79, "exit_time"] = 801
+        train, validation, trial, _ = split_by_fraction(frame)
+        self.assertNotIn(79, train.index)
+        self.assertTrue({79, 80}.issubset(validation.index))
+        self.assertTrue(set(train.lifecycle_group_id).isdisjoint(trial.lifecycle_group_id))
+
+    def test_fraction_split_rejects_invalid_reserves(self):
+        for train, val in [(.9, .1), (1, .1), (.8, 0), (float("nan"), .1)]:
+            with self.assertRaises(ValueError):
+                split_by_fraction(pd.DataFrame(), train, val)
+
     def test_default_ratio_ten_changes_cost_adjusted_target(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "raw.csv"

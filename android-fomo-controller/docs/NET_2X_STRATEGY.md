@@ -74,9 +74,14 @@ smoothed/clipped for features only; actual evaluation returns are not clipped.
 - A matching sell must be later in both source post time and availability time.
 - Buys closed by one sell share a lifecycle. Their total training weight is one.
   Reported grouped rates and bootstrap intervals operate on sell lifecycles.
-- Train labels must resolve before October 27 UTC. Validation buys start October
-  27 and resolve before November 3. Test buys start November 3. Boundary-crossing
-  opportunities are purged. No lifecycle crosses these cohorts.
+- Default cutoffs adapt to the complete supplied resolved history: approximately
+  the earliest 80% of entries define training, the next 10% validation, and the
+  latest 10% final trials. Entries at the same timestamp stay together. Training
+  labels must resolve before the first validation entry cutoff; validation labels
+  must resolve before the trial entry cutoff. Boundary-crossing opportunities
+  are purged, so final retained percentages can differ from 80/10/10. No sell
+  lifecycle crosses the retained cohorts. Exact cutoffs, counts and purges are
+  recorded in `dataset_split` in the private evaluation report.
 - The cutoff is `max(0.5, validation probability 90th percentile)` and is frozen
   before testing. The ROI gate is fixed at net 2×. HGB uses 200 iterations, 15
   leaves, leaf minimum 25, learning rate .05, L2 3, seed 388 and no random internal
@@ -86,7 +91,8 @@ smoothed/clipped for features only; actual evaluation returns are not clipped.
 - Training creates a candidate and report. It does not automatically promote,
   install, schedule, or place orders. Reusing these dates on later exports gives
   an updated diagnostic, not a fresh independent test. Reserve future dates for
-  any new model/feature/threshold decisions.
+  any new model/feature/threshold decisions. Re-running on an overlapping trial
+  portion does not create independent evidence.
 
 ## Model availability and evaluation
 
@@ -110,11 +116,14 @@ score establishes a trading edge.
 From `android-fomo-controller`, after installing `learning/requirements.txt`:
 
 ```bat
-py -3 -m learning.train_2x fomo_buy_sell_notifications.csv --train-before 2026-10-27 --test-start 2026-11-03 --output-dir local_learning_state\net2x
+py -3 -m learning.train_2x fomo_buy_sell_notifications.csv --train-fraction .80 --validation-fraction .10 --ratio 10 --output-dir local_learning_state\net2x --stage
 ```
 
-`run_learning_loop.bat` wraps this command and accepts optional train-before and
-test-start dates. The output contains `notification_net_2x.json.gz` and
+`run_learning_loop.bat` uses the same adaptive 80/10/10 split when called with
+only a CSV path. Explicit dates remain available for reproducing older experiments:
+provide both `--train-before` and `--test-start` instead of fraction options.
+Never keep the old October dates when the intent is to adapt to the latest history.
+The output contains `notification_net_2x.json.gz` and
 `evaluation.json`. Add `--stage` to also create a complete local
 `deployment/staging` directory with the forecast, matching policy and checksums.
 This only prepares files; it never installs or activates a candidate. Deliver the

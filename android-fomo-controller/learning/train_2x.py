@@ -107,6 +107,35 @@ def split(frame: pd.DataFrame, train_before: int, test_start: int):
     return train, validation, test
 
 
+def split_by_fraction(frame: pd.DataFrame, train_fraction: float = .8,
+                      validation_fraction: float = .1):
+    """Use all resolved history to choose chronological entry-time boundaries.
+
+    Labels resolving across a boundary are purged, never allowed to teach a
+    model about a future evaluation entry. Equal-time entries stay together.
+    Requested percentages describe entry cohorts before this purge.
+    """
+    if (not math.isfinite(train_fraction) or not math.isfinite(validation_fraction)
+            or not 0 < train_fraction < 1 or not 0 < validation_fraction < 1
+            or train_fraction + validation_fraction >= 1):
+        raise ValueError("Training and validation fractions must be positive and sum to less than 1")
+    ordered = frame.sort_values(["entry_time", "opportunity_id"], kind="stable")
+    train_index = int(len(ordered) * train_fraction)
+    test_index = int(len(ordered) * (train_fraction + validation_fraction))
+    if not 0 < train_index < test_index < len(ordered):
+        raise ValueError("Not enough resolved entries for three chronological cohorts")
+    train_before = int(ordered.entry_time.iloc[train_index])
+    test_start = int(ordered.entry_time.iloc[test_index])
+    train, validation, test = split(frame, train_before, test_start)
+    return train, validation, test, dict(
+        mode="chronological_fractions", requested_train_fraction=train_fraction,
+        requested_validation_fraction=validation_fraction,
+        requested_trial_fraction=1 - train_fraction - validation_fraction,
+        train_before_ms=train_before, test_start_ms=test_start,
+        purged_boundary_rows=len(frame) - len(train) - len(validation) - len(test),
+    )
+
+
 def summary(part: pd.DataFrame, p: np.ndarray, roi: np.ndarray, cutoff: float,
             ratio: float, slippage: float) -> dict:
     y = part.target_2x.to_numpy()
@@ -142,8 +171,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("csv", type=Path)
     parser.add_argument("--output-dir", type=Path, default=Path("local_learning_state/net2x"))
-    parser.add_argument("--train-before", default="2026-10-27", help="Exclusive UTC label cutoff")
-    parser.add_argument("--test-start", default="2026-11-03", help="Untouched UTC entry cutoff")
+    parser.add_argument("--train-before", help="Optional exclusive UTC label cutoff; requires --test-start")
+    parser.add_argument("--test-start", help="Optional UTC trial entry cutoff; requires --train-before")
+    parser.add_argument("--train-fraction", type=float, help="Chronological training entry fraction (default .80)")
+    parser.add_argument("--validation-fraction", type=float, help="Chronological validation entry fraction (default .10; remainder is trials)")
     parser.add_argument("--ratio", type=float, default=10)
     parser.add_argument("--slippage", type=float, default=0.0, help="Fraction per side")
     parser.add_argument("--bootstrap-forecast", type=Path, default=Path("app/src/main/assets/adaptive_hybrid_v2.json.gz"))
@@ -151,14 +182,35 @@ def main():
     args = parser.parse_args()
     frame, source_summary = build_dataset(args.csv, args.ratio, args.slippage)
     ms = lambda date: int(pd.Timestamp(date, tz="UTC").timestamp() * 1000)
-    train, validation, test = split(frame, ms(args.train_before), ms(args.test_start))
+    if bool(args.train_before) != bool(args.test_start):
+        parser.error("Provide both --train-before and --test-start, or neither")
+    if args.train_before:
+        if args.train_fraction is not None or args.validation_fraction is not None:
+            parser.error("Explicit dates cannot be combined with fraction options")
+        train_before, test_start = ms(args.train_before), ms(args.test_start)
+        train, validation, test = split(frame, train_before, test_start)
+        split_contract = dict(mode="explicit_dates", train_before_ms=train_before,
+                              test_start_ms=test_start,
+                              purged_boundary_rows=len(frame)-len(train)-len(validation)-len(test))
+    else:
+        train, validation, test, split_contract = split_by_fraction(
+            frame, .8 if args.train_fraction is None else args.train_fraction,
+            .1 if args.validation_fraction is None else args.validation_fraction)
+    for name, part in [("training", train), ("validation", validation), ("trial", test)]:
+        split_contract[name] = dict(rows=len(part), lifecycle_groups=part.lifecycle_group_id.nunique(),
+                                    entry_start_ms=int(part.entry_time.min()), entry_end_ms=int(part.entry_time.max()),
+                                    labels_through_ms=int(part.exit_time.max()))
+    cutoff_iso = lambda value: pd.to_datetime(value, unit="ms", utc=True).isoformat()
+    train_before_utc = cutoff_iso(split_contract["train_before_ms"])
+    test_start_utc = cutoff_iso(split_contract["test_start_ms"])
     classifier, regressor = fit(train)
     vp = classifier.predict_proba(validation[FEATURES])[:, 1]
     # Fixed before test inspection. A percentile is not an absolute probability.
     cutoff = max(0.5, float(np.quantile(vp, .90)))
     digest = hashlib.sha256(args.csv.read_bytes()).hexdigest()
-    training_contract = dict(schema=SCHEMA, source=digest, train_before=args.train_before,
-                             test_start=args.test_start, ratio=args.ratio, slippage=args.slippage,
+    training_contract = dict(schema=SCHEMA, source=digest, train_before=train_before_utc,
+                             test_start=test_start_utc, split=split_contract,
+                             ratio=args.ratio, slippage=args.slippage,
                              features=FEATURES, iterations=200, seed=388, sklearn=sklearn.__version__)
     model_key = hashlib.sha256(json.dumps(training_contract, sort_keys=True).encode()).hexdigest()[:12]
     payload = dict(
@@ -201,7 +253,8 @@ def main():
                    model_id=payload["modelId"], training_contract=training_contract,
                    label="net proceeds / (principal + entry fee) >= 2 at first later same-trader/ticker sell",
                    limitation="Market-cap return proxy, not observed fills, quantities, or realized cash gains",
-                   train_before_utc=args.train_before, test_start_utc=args.test_start,
+                   train_before_utc=train_before_utc, test_start_utc=test_start_utc,
+                   dataset_split=split_contract, resolved_dataset_rows=len(frame),
                    training_rows=len(train), training_lifecycles=train.lifecycle_group_id.nunique(),
                    training_2x_rate=float(train.target_2x.mean()), probability_cutoff=cutoff,
                    numeric_features=NUMERIC_FEATURES, categorical_features=["trader", "token"],
