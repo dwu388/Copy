@@ -146,6 +146,19 @@ class EventDatabase(context: Context) :
         }
     }
 
+    fun freshMarketCap(trader: String, token: String, now: Long, maxAge: Long): Double? =
+        readableDatabase.rawQuery(
+            "SELECT market_cap FROM recorded_notifications WHERE package_name='family.fomo.app' " +
+                "AND lower(trim(trader))=lower(trim(?)) AND lower(trim(coin))=lower(trim(?)) " +
+                "AND post_time>=? AND post_time<=? AND captured_time>=? AND captured_time<=? " +
+                "ORDER BY captured_time DESC,event_id DESC LIMIT 1",
+            arrayOf(trader, token, (now-maxAge).toString(), now.toString(),
+                (now-maxAge).toString(), now.toString())
+        ).use { c ->
+            if (!c.moveToFirst() || c.isNull(0)) null
+            else c.getDouble(0).takeIf { it.isFinite() && it > 0 }
+        }
+
     fun recentRecorded(limit: Int = 40): List<RecordedNotification> {
         readableDatabase.query(
             "recorded_notifications",

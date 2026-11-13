@@ -220,6 +220,8 @@ class FomoNotificationListener : NotificationListenerService() {
     }
 
     private fun clearHandledNotifications() {
+        runCatching { AdaptiveHybridEngine.expirePaperPositions() }
+            .onFailure { Log.e(TAG, "Paper expiry sweep failed; will retry", it) }
         val active = runCatching { activeNotifications.toList() }
             .onFailure { error -> Log.w(TAG, "Could not read active notifications", error) }
             .getOrElse { return }

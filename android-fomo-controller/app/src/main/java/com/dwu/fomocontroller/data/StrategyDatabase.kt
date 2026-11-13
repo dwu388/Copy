@@ -563,6 +563,28 @@ class StrategyDatabase(context: Context) :
         db.insertWithOnConflict("decisions", null, values, SQLiteDatabase.CONFLICT_REPLACE)
     }
 
+    fun overduePaperPositions(db: SQLiteDatabase, cutoff: Long): List<StrategyPosition> =
+        db.rawQuery(
+            "SELECT p.id,p.trader,p.token,p.entry_market_cap,p.principal,p.opened_time " +
+                "FROM positions p JOIN plans b ON b.notification_key=p.buy_notification_key " +
+                "WHERE p.status='OPEN' AND b.action='bought' AND b.status='PAPER_EXECUTED' " +
+                "AND p.opened_time<? ORDER BY p.opened_time,p.id", arrayOf(cutoff.toString())
+        ).use { c -> buildList {
+            while (c.moveToNext()) add(StrategyPosition(c.getLong(0), c.getString(1), c.getString(2),
+                c.getDouble(3), c.getDouble(4), c.getLong(5)))
+        } }
+
+    fun cancelPlansForExpiry(db: SQLiteDatabase, positions: List<StrategyPosition>) {
+        val keys = mutableSetOf<String>()
+        for (position in positions) db.rawQuery(
+            "SELECT p.notification_key FROM plans p JOIN plan_positions pp " +
+                "ON pp.plan_notification_key=p.notification_key " +
+                "WHERE pp.position_id=? AND p.status IN ('PLANNED','PREPARED')",
+            arrayOf(position.id.toString())
+        ).use { c -> while (c.moveToNext()) keys.add(c.getString(0)) }
+        for (key in keys) setPlanStatus(db, key, "CANCELLED_24H_EXPIRY")
+    }
+
     fun addPlan(db: SQLiteDatabase, plan: StrategyPlan) {
         db.insertOrThrow("plans", null, ContentValues().apply {
             put("notification_key", plan.notificationKey); put("action", plan.action)
