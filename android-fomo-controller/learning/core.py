@@ -17,6 +17,8 @@ from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostin
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
+from learning.policy_labels import HOLD_MS, LABEL_CONTRACT, reference_net_roi
+
 FEATURES = ["trader", "log_market_cap", "log_source_buy_usd"]
 REQUIRED = {
     "opportunity_id", "trader", "token", "entry_market_cap", "source_buy_usd",
@@ -25,12 +27,16 @@ REQUIRED = {
 }
 
 
-def load_learning_csv(path: Path) -> pd.DataFrame:
+def load_learning_csv(path: Path, *, require_policy: bool = True) -> pd.DataFrame:
     # Coin tickers such as "NA" are literal identifiers, not pandas nulls.
     frame = pd.read_csv(path, keep_default_na=False, na_values=[""])
     missing = REQUIRED - set(frame.columns)
     if missing:
         raise ValueError(f"Learning export is missing columns: {sorted(missing)}")
+    policy = "label_contract" in frame and frame.label_contract.eq(LABEL_CONTRACT).all()
+    if require_policy and not policy:
+        raise ValueError("Legacy source-sell labels exclude unsold buys. Run learning.prepare_raw_notifications "
+                         "on the raw notification CSV to build mature 24-hour policy labels first.")
     frame = frame.loc[frame["status"].eq("RESOLVED")].copy()
     numeric = ["entry_market_cap", "source_buy_usd", "entry_time", "exit_time", "realized_source_roi"]
     for column in numeric:
@@ -46,10 +52,30 @@ def load_learning_csv(path: Path) -> pd.DataFrame:
         & np.isfinite(frame["realized_source_roi"])
     )
     frame = frame.loc[valid].drop_duplicates("opportunity_id", keep="last")
-    frame["profitable"] = frame["realized_source_roi"].gt(0).astype(int)
+    if policy:
+        for column in ("label_available_time", "observation_end_time", "deadline_time"):
+            frame[column] = pd.to_numeric(frame[column], errors="raise")
+        if not (frame.label_available_time.eq(frame.deadline_time)
+                & frame.deadline_time.ge(frame.entry_time + HOLD_MS)
+                & frame.label_available_time.le(frame.observation_end_time)
+                & frame.exit_time.le(frame.label_available_time)
+                & frame.realized_source_roi.ge(-1)).all():
+            raise ValueError("Invalid or not yet available policy labels")
+        frame["profitable"] = (reference_net_roi(frame) > 0).astype(int)
+    else:
+        frame["label_available_time"] = frame["exit_time"]
+        frame["profitable"] = frame["realized_source_roi"].gt(0).astype(int)
     frame["log_market_cap"] = np.log1p(frame["entry_market_cap"])
     frame["log_source_buy_usd"] = np.log1p(frame["source_buy_usd"])
     return frame.sort_values(["exit_time", "entry_time", "opportunity_id"]).reset_index(drop=True)
+
+
+def causal_training(frame: pd.DataFrame, validation: pd.DataFrame) -> pd.DataFrame:
+    """Every training label must predate the earliest scored BUY, with group purge."""
+    cutoff = validation.entry_time.min()
+    groups = set(validation.lifecycle_group_id)
+    return frame.loc[frame.label_available_time.lt(cutoff)
+                     & ~frame.lifecycle_group_id.isin(groups)].copy()
 
 
 def _preprocessor() -> ColumnTransformer:
@@ -171,6 +197,7 @@ def build_payload(
     if not 0 <= adapter_weight <= 0.35:
         raise ValueError("adapter_weight must be within the Android safety cap [0, 0.35]")
     classifier, regressor = fit_models(train)
+    policy_labels = "label_contract" in train and train.label_contract.eq(LABEL_CONTRACT).all()
     probabilities = classifier.predict_proba(train[FEATURES])[:, 1]
     roi_prediction = regressor.predict(train[FEATURES])
     payload: dict[str, Any] = {
@@ -178,17 +205,23 @@ def build_payload(
         "schemaVersion": "adaptive_hybrid_hgb_v1",
         "modelId": model_id,
         "parentModelId": parent_model_id,
-        "trainedThrough": datetime.fromtimestamp(float(train["exit_time"].max()) / 1000, timezone.utc).isoformat(),
+        "trainedThrough": datetime.fromtimestamp(float(train["label_available_time"].max()) / 1000, timezone.utc).isoformat(),
         "featureContract": ["trader", "log1p(entry_market_cap)", "log1p(source_buy_usd)"],
-        "matchingRule": "first later SELL with same normalized trader and token",
+        "matchingRule": ("first observed same-pair SELL within 24h, otherwise fresh deadline mark or assumed write-off"
+                         if policy_labels else "first later same-pair source sell; conditional-sell baseline only"),
+        "labelContract": LABEL_CONTRACT if policy_labels else "legacy_source_sell_v1",
+        "probabilityTarget": ("positive net return at source_buy_usd/20 after standard buy and sell fees"
+                              if policy_labels else "positive gross source-sell return"),
+        "roiTarget": ("gross notification-policy ROI; fees remain the runtime policy's responsibility"
+                      if policy_labels else "gross first-source-sell ROI; diagnostic baseline only"),
         "excludedTraders": [],
         "roiUncertaintyScale": float(np.median(np.abs(train["realized_source_roi"] - roi_prediction))),
         "confidenceReference": [float(x) for x in np.sort(probabilities)],
         "classifier": export_pipeline(classifier),
         "regressor": export_pipeline(regressor),
     }
-    cutoff = float(train["exit_time"].max()) - adapter_days * 86_400_000
-    recent = train.loc[train["exit_time"].ge(cutoff)]
+    cutoff = float(train["label_available_time"].max()) - adapter_days * 86_400_000
+    recent = train.loc[train["label_available_time"].ge(cutoff)]
     if adapter_weight > 0 and len(recent) >= 100 and recent["profitable"].nunique() == 2:
         recent_classifier, recent_regressor = fit_models(recent, max_iter=125)
         payload["recentAdapter"] = {
@@ -236,10 +269,12 @@ def build_adapter_payload(
     adapter_weight: float = 0.30,
 ) -> dict[str, Any]:
     """Keep the stable trees frozen and learn only a capped recent-regime adapter."""
+    if champion.get("labelContract") != LABEL_CONTRACT:
+        raise ValueError("A legacy conditional-sell model requires full compaction, not an adapter")
     if not 0 < adapter_weight <= 0.35:
         raise ValueError("adapter_weight must be within the Android safety cap (0, 0.35]")
-    cutoff = float(train["exit_time"].max()) - adapter_days * 86_400_000
-    recent = train.loc[train["exit_time"].ge(cutoff)]
+    cutoff = float(train["label_available_time"].max()) - adapter_days * 86_400_000
+    recent = train.loc[train["label_available_time"].ge(cutoff)]
     if len(recent) < 100 or recent["profitable"].nunique() < 2:
         raise ValueError("Recent adapter requires 100 rows and both outcome classes")
     recent_classifier, recent_regressor = fit_models(recent, max_iter=125)
@@ -250,7 +285,7 @@ def build_adapter_payload(
         "schemaVersion": "adaptive_hybrid_hgb_v1",
         "modelId": model_id,
         "parentModelId": parent_model_id,
-        "trainedThrough": datetime.fromtimestamp(float(train["exit_time"].max()) / 1000, timezone.utc).isoformat(),
+        "trainedThrough": datetime.fromtimestamp(float(train["label_available_time"].max()) / 1000, timezone.utc).isoformat(),
         "recentAdapter": {
             "lookbackDays": adapter_days,
             "probabilityWeight": adapter_weight,
@@ -313,8 +348,7 @@ def metrics(frame: pd.DataFrame, scores: pd.DataFrame, threshold: float = 0.80) 
     selected = scores.loc[valid, "confidence"].to_numpy(float) >= threshold
     top10 = scores.loc[valid, "confidence"].to_numpy(float) >= 0.90
     if "source_buy_usd" in frame:
-        assumed_size = frame.loc[valid, "source_buy_usd"].to_numpy(float) / 20.0
-        net_roi = actual_roi - 2 * np.maximum(0.95, 0.005 * assumed_size) / assumed_size
+        net_roi = reference_net_roi(frame.loc[valid])
     else:
         net_roi = actual_roi
     bins = np.minimum((p * 10).astype(int), 9)
@@ -356,8 +390,7 @@ def compare_grouped(
     work = frame[columns].copy()
     economic_roi = work["realized_source_roi"]
     if "source_buy_usd" in work:
-        assumed_size = work["source_buy_usd"] / 20.0
-        economic_roi = economic_roi - 2 * np.maximum(0.95, 0.005 * assumed_size) / assumed_size
+        economic_roi = pd.Series(reference_net_roi(work), index=work.index)
     work["champion_utility"] = np.where(champion["confidence"].ge(0.80), economic_roi, 0.0)
     work["challenger_utility"] = np.where(challenger["confidence"].ge(0.80), economic_roi, 0.0)
     work["utility_delta"] = work["challenger_utility"] - work["champion_utility"]
@@ -367,11 +400,16 @@ def compare_grouped(
         raise ValueError("Promotion requires at least 20 independent lifecycle groups")
     rng = np.random.default_rng(seed)
     draws = rng.choice(delta, size=(bootstrap_samples, len(delta)), replace=True).mean(axis=1)
+    challenger_utility = grouped["challenger_utility"].to_numpy()
+    absolute_draws = rng.choice(challenger_utility,
+                                size=(bootstrap_samples, len(delta)), replace=True).mean(axis=1)
     lower = float(np.quantile(draws, 0.05))
     mean_delta = float(delta.mean())
     champion_metrics = metrics(frame, champion)
     challenger_metrics = metrics(frame, challenger)
     reasons = []
+    if float(np.quantile(absolute_draws, 0.05)) <= 0:
+        reasons.append("challenger absolute net utility lower bound is not positive")
     if lower <= 0:
         reasons.append("paired lifecycle bootstrap lower bound is not positive")
     if mean_delta < 0.002:

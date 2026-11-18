@@ -10,8 +10,10 @@ from pathlib import Path
 
 import pandas as pd
 
+from learning.policy_labels import LABEL_CONTRACT
+
 from learning.core import (
-    build_adapter_payload, build_payload, compare_grouped, load_learning_csv, read_payload, score_payload,
+    build_adapter_payload, build_payload, causal_training, compare_grouped, load_learning_csv, read_payload, score_payload,
     sha256, write_payload,
 )
 
@@ -96,17 +98,16 @@ def main() -> None:
         [iso_to_ms(champion["trainedThrough"])]
         + [int(x["watermarkExitTime"]) for x in registry["forecastCohorts"]]
     )
-    fresh = frame.loc[frame["exit_time"].gt(watermark)].copy()
+    fresh = frame.loc[frame["label_available_time"].gt(watermark)].copy()
     ordered_groups = (
-        fresh.groupby("lifecycle_group_id")["exit_time"].max().sort_values().index.tolist()
+        fresh.groupby("lifecycle_group_id")["entry_time"].min().sort_values().index.tolist()
     )
     if len(ordered_groups) < args.cohort_groups:
         print(f"no_cycle fresh_lifecycle_groups={len(ordered_groups)} required={args.cohort_groups}")
         return
     cohort_groups = set(ordered_groups[-args.cohort_groups:])
     cohort = fresh.loc[fresh["lifecycle_group_id"].isin(cohort_groups)].copy()
-    cohort_start = float(cohort["exit_time"].min())
-    train = frame.loc[frame["exit_time"].lt(cohort_start)].copy()
+    train = causal_training(frame, cohort)
     if len(train) < args.min_train_rows:
         print(f"no_cycle training_rows={len(train)} required={args.min_train_rows}")
         return
@@ -123,7 +124,7 @@ def main() -> None:
         "consumed": True,
         "status": "EVALUATING",
         "consumedAt": now.isoformat(),
-        "watermarkExitTime": int(fresh["exit_time"].max()),
+        "watermarkExitTime": int(fresh["label_available_time"].max()),
         "lifecycleGroups": len(cohort_groups),
         "rows": len(cohort),
         "championModelId": champion_id,
@@ -136,8 +137,9 @@ def main() -> None:
 
     last_compaction_ms = iso_to_ms(registry.get("lastCompactionAt") or champion["trainedThrough"])
     compaction_due = (
-        registry.get("adapterPromotionsSinceCompaction", 0) >= 8
-        or float(train["exit_time"].max()) - last_compaction_ms >= 14 * 86_400_000
+        champion.get("labelContract") != LABEL_CONTRACT
+        or registry.get("adapterPromotionsSinceCompaction", 0) >= 8
+        or float(train["label_available_time"].max()) - last_compaction_ms >= 14 * 86_400_000
     )
     challenger = (
         build_payload(train, model_id, champion_id, args.adapter_days, args.adapter_weight)

@@ -25,7 +25,8 @@ COLUMNS = [
 ]
 
 
-def import_raw_notifications(path: Path) -> tuple[pd.DataFrame, dict[str, int]]:
+def import_raw_notifications(path: Path, *, as_of_ms: int | None = None,
+                             availability_order: bool = False) -> tuple[pd.DataFrame, dict[str, int]]:
     raw = pd.read_csv(path, keep_default_na=False, na_values=[""])
     missing = REQUIRED - set(raw.columns)
     if missing:
@@ -34,7 +35,14 @@ def import_raw_notifications(path: Path) -> tuple[pd.DataFrame, dict[str, int]]:
         raise ValueError("Raw notification export has missing or duplicate event_id values")
     for column in ("post_time", "market_cap", "source_amount"):
         raw[column] = pd.to_numeric(raw[column], errors="coerce")
-    raw = raw.sort_values(["post_time", "event_id"], kind="stable")
+    time_column = "post_time"
+    if availability_order:
+        raw["captured_time"] = pd.to_numeric(raw["captured_time"], errors="coerce")
+        raw = raw.loc[raw.post_time.le(raw.captured_time)].copy()
+        time_column = "captured_time"
+    if as_of_ms is not None:
+        raw = raw.loc[raw[time_column].le(as_of_ms)].copy()
+    raw = raw.sort_values([time_column, "event_id"], kind="stable")
     summary = {"source_rows": len(raw), "invalid_trade_rows": 0, "duplicates_3m": 0,
                "resolved_buys": 0, "open_buys": 0, "orphan_sells": 0}
     seen: dict[tuple, float] = {}
@@ -55,12 +63,13 @@ def import_raw_notifications(path: Path) -> tuple[pd.DataFrame, dict[str, int]]:
         trader, token = row.trader.strip(), row.coin.strip()
         key = (trader.casefold(), token.casefold())
         fingerprint = (row.action, *key, float(row.market_cap), float(row.source_amount))
+        event_time = getattr(row, time_column)
         previous = seen.get(fingerprint)
-        if previous is not None and row.post_time - previous < 180_000:
+        if previous is not None and event_time - previous < 180_000:
             summary["duplicates_3m"] += 1
             continue
-        seen[fingerprint] = row.post_time
-        time = int(row.post_time)
+        seen[fingerprint] = event_time
+        time = int(event_time)
         if row.action == "bought":
             open_buys[key].append({
                 "opportunity_id": f"{row.notification_key}@{time}",
