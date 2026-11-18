@@ -122,7 +122,14 @@ top-decile ranking. Do not tune the cutoff or model after seeing test outcomes
 and then cite that same test as untouched. The exported artifact is experimental,
 not an activated champion. Its `trainedThrough` must precede the holdout.
 
-The raw recorder retains repeated callbacks, so preparation applies the Android three-minute duplicate fingerprint and first-later-sell rules. Open buys remain unknown. Timestamps come from `post_time` (milliseconds UTC), not capture time. Test dates must be later than training dates; evaluate on untouched lifecycles before proposing any champion. The protected recursive promotion loop still consumes the app's separate `copy_learning_opportunities.csv`, with its forecast/policy IDs and one-use cohort registry. K:P workbook rows have no timestamps or lifecycle IDs and cannot directly replace that export.
+Preparation deduplicates callbacks and creates **24-hour policy labels for every
+mature buy**, including assumed losses when no fresh timeout quote is available.
+Recent buys stay pending. Capture times establish availability; source post times
+also constrain quote freshness. Trainers reject legacy sell-only exports. Prepare
+the raw CSV first, then use that prepared dataset for maintenance and cross-fitting.
+The app's separate `copy_learning_opportunities.csv` remains a source-action audit.
+K:P workbook rows lack the timestamps needed for this training contract. See
+[`docs/RECURSIVE_LEARNING.md`](docs/RECURSIVE_LEARNING.md) for migration and backtests.
 
 
 ## Recursive model improvement
@@ -133,8 +140,9 @@ on Windows; Android performs capture, inference, causal outcome recording,
 artifact validation, and atomic activation. New information never directly
 overwrites the active model.
 
-Use **Export recursive-learning CSV** for forecast/policy evidence and **Export
-execution-calibration CSV** for prepare/confirmation/failure timing. See
+Use the **raw notification CSV** to prepare forecast/policy labels, the
+recursive-learning export to audit original predictions/source outcomes, and the
+execution-calibration export for prepare/confirmation/failure timing. See
 `docs/RECURSIVE_LEARNING.md` for the complete training, one-use cohort,
 independent policy promotion, staging, and rollback workflow.
 

@@ -1,0 +1,481 @@
+{
+  "assumptions": [
+    "All buys must have a complete 24h observation window, including early sells.",
+    "First source sell by deadline; otherwise latest same trader/ticker quote with capture and post age <=5m.",
+    "No fresh quote means assumed zero proceeds, not proof of zero market value.",
+    "Deadline starts at buy capture; exact Android execution/sweep times unavailable.",
+    "Fixed 1:20, NORMAL fee gate/exposure/reserve/burst limits, $1000 initial cash; unknown open values at cost.",
+    "Immediate notification-cap fills; no UI failures, adaptive modes, stage promotion or dynamic reserves.",
+    "Sell fees charged per simulated lot; Android may aggregate lots, so fees can differ.",
+    "Ticker-only identity can match unrelated assets; extreme source returns are retained and reported, not treated as verified fills.",
+    "No parameter selection on evaluated periods; latest forward file was already inspected.",
+    "Bootstrap resamples calendar-day P&L blocks from fixed ledgers, not whole re-executed paths.",
+    "This diagnostic never promotes or replaces a deployed model."
+  ],
+  "forward_labels": {
+    "as_of_ms": 1794971115697,
+    "assumption": "scheduled 24h deadline; missing fresh notification quote = assumed full loss",
+    "duplicates_3m": 4,
+    "invalid_trade_rows": 30,
+    "label_contract": "notification_24h_net_reference_v1",
+    "open_buys": 259,
+    "orphan_sells": 272,
+    "outcomes": {
+      "PENDING": 140,
+      "SOURCE_SELL": 292,
+      "TIMEOUT_ASSUMED_LOSS": 206
+    },
+    "resolved_buys": 379,
+    "source_rows": 1177
+  },
+  "historical_holdout": {
+    "base_net_win_rate": 0.20289466630930045,
+    "earliest_test_buy_utc": "2026-10-24T00:18:48.562000+00:00",
+    "forecasts": {
+      "bundled": {
+        "brier": 0.22188160990128156,
+        "calibration_ece": 0.2548871990943755,
+        "coverage": 0.29107477887965694,
+        "log_loss": 0.6395640904449686,
+        "roi_mae": 1518.962779020667,
+        "top10_net_roi": -0.06392129357343317,
+        "top20_net_roi": -0.17627607019558902,
+        "top20_win_rate": 0.3324125230202578
+      },
+      "fresh_sell_only": {
+        "brier": 0.19942671181746696,
+        "calibration_ece": 0.21221883406307848,
+        "coverage": 0.18440096488876978,
+        "log_loss": 0.5890583275005289,
+        "roi_mae": 1518.9342016049036,
+        "top10_net_roi": -0.05813182796479926,
+        "top20_net_roi": -0.1078732707368558,
+        "top20_win_rate": 0.3953488372093023
+      },
+      "policy_24h": {
+        "brier": 0.14001333048515135,
+        "calibration_ece": 0.037134626064626364,
+        "coverage": 0.2087912087912088,
+        "log_loss": 0.43676064274401843,
+        "roi_mae": 1518.7670082794582,
+        "top10_net_roi": 0.1064384656918941,
+        "top20_net_roi": 0.015050194251360303,
+        "top20_win_rate": 0.44801026957637996
+      }
+    },
+    "gross_roi_diagnostics": {
+      "above_100x_gain_rows": 3,
+      "maximum": 5664555.962025316,
+      "median": -0.45895522388059706
+    },
+    "latest_policy_label_available_utc": "2026-10-23T23:58:11.080000+00:00",
+    "replays": {
+      "slippage_per_side_0": {
+        "bundled": {
+          "eligible_buys": 3731,
+          "executed_buys": 128,
+          "final_cash": 151.61329866236105,
+          "initial_cash": 1000.0,
+          "max_drawdown_at_cost": 0.9257597884340479,
+          "net_pnl": -848.3867013376389,
+          "net_win_rate": 0.4609375,
+          "net_wins": 59,
+          "outcomes": {
+            "SOURCE_SELL": 87,
+            "TIMEOUT_ASSUMED_LOSS": 41
+          },
+          "rejected": {
+            "confidence": 2645,
+            "fee": 351,
+            "risk": 607
+          },
+          "return_fraction": -0.8483867013376389
+        },
+        "fresh_sell_only": {
+          "eligible_buys": 3731,
+          "executed_buys": 113,
+          "final_cash": 157.07225973301178,
+          "initial_cash": 1000.0,
+          "max_drawdown_at_cost": 0.9155499209404976,
+          "net_pnl": -842.9277402669882,
+          "net_win_rate": 0.3893805309734513,
+          "net_wins": 44,
+          "outcomes": {
+            "SOURCE_SELL": 72,
+            "TIMEOUT_ASSUMED_LOSS": 40,
+            "TIMEOUT_MARK": 1
+          },
+          "rejected": {
+            "confidence": 3043,
+            "fee": 189,
+            "risk": 386
+          },
+          "return_fraction": -0.8429277402669882
+        },
+        "policy_24h": {
+          "eligible_buys": 3731,
+          "executed_buys": 120,
+          "final_cash": 173.18441876050082,
+          "initial_cash": 1000.0,
+          "max_drawdown_at_cost": 0.9064565189243755,
+          "net_pnl": -826.8155812394991,
+          "net_win_rate": 0.38333333333333336,
+          "net_wins": 46,
+          "outcomes": {
+            "SOURCE_SELL": 91,
+            "TIMEOUT_ASSUMED_LOSS": 28,
+            "TIMEOUT_MARK": 1
+          },
+          "rejected": {
+            "confidence": 2952,
+            "fee": 290,
+            "risk": 369
+          },
+          "return_fraction": -0.8268155812394992
+        },
+        "policy_vs_bundled": {
+          "calendar_days": 17,
+          "daily_delta_ci95": [
+            -48.13775318773098,
+            60.08791576999942
+          ],
+          "mean_daily_pnl_delta": 1.2688894175375551,
+          "positive_lower_bound": false
+        },
+        "policy_vs_fresh_sell_only": {
+          "calendar_days": 17,
+          "daily_delta_ci95": [
+            -46.968465464745044,
+            50.68670631779043
+          ],
+          "mean_daily_pnl_delta": 0.9477740604405369,
+          "positive_lower_bound": false
+        }
+      },
+      "slippage_per_side_0.01": {
+        "bundled": {
+          "eligible_buys": 3731,
+          "executed_buys": 101,
+          "final_cash": 155.136718461149,
+          "initial_cash": 1000.0,
+          "max_drawdown_at_cost": 0.9225256560980699,
+          "net_pnl": -844.863281538851,
+          "net_win_rate": 0.42574257425742573,
+          "net_wins": 43,
+          "outcomes": {
+            "SOURCE_SELL": 68,
+            "TIMEOUT_ASSUMED_LOSS": 33
+          },
+          "rejected": {
+            "confidence": 2645,
+            "fee": 406,
+            "risk": 579
+          },
+          "return_fraction": -0.844863281538851
+        },
+        "fresh_sell_only": {
+          "eligible_buys": 3731,
+          "executed_buys": 93,
+          "final_cash": 151.5901012960323,
+          "initial_cash": 1000.0,
+          "max_drawdown_at_cost": 0.9178231832899119,
+          "net_pnl": -848.4098987039677,
+          "net_win_rate": 0.34408602150537637,
+          "net_wins": 32,
+          "outcomes": {
+            "SOURCE_SELL": 57,
+            "TIMEOUT_ASSUMED_LOSS": 35,
+            "TIMEOUT_MARK": 1
+          },
+          "rejected": {
+            "confidence": 3043,
+            "fee": 259,
+            "risk": 336
+          },
+          "return_fraction": -0.8484098987039677
+        },
+        "policy_24h": {
+          "eligible_buys": 3731,
+          "executed_buys": 80,
+          "final_cash": 185.4490195022537,
+          "initial_cash": 1000.0,
+          "max_drawdown_at_cost": 0.8957893465792601,
+          "net_pnl": -814.5509804977463,
+          "net_win_rate": 0.325,
+          "net_wins": 26,
+          "outcomes": {
+            "SOURCE_SELL": 61,
+            "TIMEOUT_ASSUMED_LOSS": 19
+          },
+          "rejected": {
+            "confidence": 2952,
+            "fee": 384,
+            "risk": 315
+          },
+          "return_fraction": -0.8145509804977463
+        },
+        "policy_vs_bundled": {
+          "calendar_days": 17,
+          "daily_delta_ci95": [
+            -50.82230000916693,
+            59.1381119403467
+          ],
+          "mean_daily_pnl_delta": 1.7830765318296558,
+          "positive_lower_bound": false
+        },
+        "policy_vs_fresh_sell_only": {
+          "calendar_days": 17,
+          "daily_delta_ci95": [
+            -45.64067682064823,
+            52.96697308999112
+          ],
+          "mean_daily_pnl_delta": 1.9917010709542353,
+          "positive_lower_bound": false
+        }
+      }
+    },
+    "test_buys": 3731,
+    "test_outcomes": {
+      "SOURCE_SELL": 2245,
+      "TIMEOUT_ASSUMED_LOSS": 1482,
+      "TIMEOUT_MARK": 4
+    },
+    "training_policy_rows": 7472,
+    "training_sell_only_rows": 5809
+  },
+  "history_labels": {
+    "as_of_ms": 1794335055855,
+    "assumption": "scheduled 24h deadline; missing fresh notification quote = assumed full loss",
+    "duplicates_3m": 328,
+    "invalid_trade_rows": 50,
+    "label_contract": "notification_24h_net_reference_v1",
+    "open_buys": 2467,
+    "orphan_sells": 5033,
+    "outcomes": {
+      "PENDING": 348,
+      "SOURCE_SELL": 6766,
+      "TIMEOUT_ASSUMED_LOSS": 4727,
+      "TIMEOUT_MARK": 15
+    },
+    "resolved_buys": 9389,
+    "source_rows": 21471
+  },
+  "holdout_start_utc": "2026-10-24",
+  "inputs_sha256": {
+    "champion": "9c69df7d6bb8e669674dbe51ce9931387dc6f874f9ae24d9e4615f5fc4b57b84",
+    "forward": "09520e58076b68ae01988a1ab788e8ed1fab5d96eec87b63e9aef889dfdeeedb",
+    "history": "15577b731b09c3e3e90d689d36f79094fdc3de51f5f48250f9134c4d553c28e7"
+  },
+  "latest_forward": {
+    "base_net_win_rate": 0.13453815261044177,
+    "earliest_test_buy_utc": "2026-11-14T01:15:54.484000+00:00",
+    "forecasts": {
+      "bundled": {
+        "brier": 0.27017127449851236,
+        "calibration_ece": 0.3534138014272938,
+        "coverage": 0.3333333333333333,
+        "log_loss": 0.7612269419267201,
+        "roi_mae": 0.6744236324487959,
+        "top10_net_roi": -0.29271651493460854,
+        "top20_net_roi": -0.30042413565985326,
+        "top20_win_rate": 0.16265060240963855
+      },
+      "fresh_sell_only": {
+        "brier": 0.20934707914827294,
+        "calibration_ece": 0.28130942453289426,
+        "coverage": 0.20883534136546184,
+        "log_loss": 0.6073271958119253,
+        "roi_mae": 0.6089232077573388,
+        "top10_net_roi": -0.14307448658377284,
+        "top20_net_roi": -0.20810152234391543,
+        "top20_win_rate": 0.14423076923076922
+      },
+      "policy_24h": {
+        "brier": 0.13900180867445547,
+        "calibration_ece": 0.12001814428281044,
+        "coverage": 0.2891566265060241,
+        "log_loss": 0.43040507819349305,
+        "roi_mae": 0.40885249475975544,
+        "top10_net_roi": -0.14026551615676094,
+        "top20_net_roi": -0.179460581990491,
+        "top20_win_rate": 0.2013888888888889
+      }
+    },
+    "gross_roi_diagnostics": {
+      "above_100x_gain_rows": 0,
+      "maximum": 5.849740932642487,
+      "median": -0.5128437950537873
+    },
+    "latest_policy_label_available_utc": "2026-11-10T18:23:38.427000+00:00",
+    "replays": {
+      "slippage_per_side_0": {
+        "bundled": {
+          "eligible_buys": 498,
+          "executed_buys": 72,
+          "final_cash": 161.96845670909724,
+          "initial_cash": 1000.0,
+          "max_drawdown_at_cost": 0.8384374486412584,
+          "net_pnl": -838.0315432909027,
+          "net_win_rate": 0.2222222222222222,
+          "net_wins": 16,
+          "outcomes": {
+            "SOURCE_SELL": 56,
+            "TIMEOUT_ASSUMED_LOSS": 16
+          },
+          "rejected": {
+            "confidence": 332,
+            "fee": 32,
+            "risk": 62
+          },
+          "return_fraction": -0.8380315432909028
+        },
+        "fresh_sell_only": {
+          "eligible_buys": 498,
+          "executed_buys": 73,
+          "final_cash": 219.99435031203808,
+          "initial_cash": 1000.0,
+          "max_drawdown_at_cost": 0.789053003495218,
+          "net_pnl": -780.005649687962,
+          "net_win_rate": 0.1643835616438356,
+          "net_wins": 12,
+          "outcomes": {
+            "SOURCE_SELL": 62,
+            "TIMEOUT_ASSUMED_LOSS": 11
+          },
+          "rejected": {
+            "confidence": 394,
+            "fee": 21,
+            "risk": 10
+          },
+          "return_fraction": -0.7800056496879619
+        },
+        "policy_24h": {
+          "eligible_buys": 498,
+          "executed_buys": 87,
+          "final_cash": 464.54825071187173,
+          "initial_cash": 1000.0,
+          "max_drawdown_at_cost": 0.6788656814727138,
+          "net_pnl": -535.4517492881282,
+          "net_win_rate": 0.21839080459770116,
+          "net_wins": 19,
+          "outcomes": {
+            "SOURCE_SELL": 77,
+            "TIMEOUT_ASSUMED_LOSS": 10
+          },
+          "rejected": {
+            "confidence": 354,
+            "fee": 55,
+            "risk": 2
+          },
+          "return_fraction": -0.5354517492881283
+        },
+        "policy_vs_bundled": {
+          "calendar_days": 4,
+          "daily_delta_ci95": [
+            -158.22997625401612,
+            428.24635207374126
+          ],
+          "mean_daily_pnl_delta": 75.64494850069438,
+          "positive_lower_bound": false
+        },
+        "policy_vs_fresh_sell_only": {
+          "calendar_days": 4,
+          "daily_delta_ci95": [
+            -39.93968720234434,
+            184.67093393769338
+          ],
+          "mean_daily_pnl_delta": 61.13847509995871,
+          "positive_lower_bound": false
+        }
+      },
+      "slippage_per_side_0.01": {
+        "bundled": {
+          "eligible_buys": 498,
+          "executed_buys": 71,
+          "final_cash": 162.47589540198226,
+          "initial_cash": 1000.0,
+          "max_drawdown_at_cost": 0.8375241045980177,
+          "net_pnl": -837.5241045980177,
+          "net_win_rate": 0.2535211267605634,
+          "net_wins": 18,
+          "outcomes": {
+            "SOURCE_SELL": 55,
+            "TIMEOUT_ASSUMED_LOSS": 16
+          },
+          "rejected": {
+            "confidence": 332,
+            "fee": 39,
+            "risk": 56
+          },
+          "return_fraction": -0.8375241045980177
+        },
+        "fresh_sell_only": {
+          "eligible_buys": 498,
+          "executed_buys": 50,
+          "final_cash": 266.27842684423194,
+          "initial_cash": 1000.0,
+          "max_drawdown_at_cost": 0.7379399272017952,
+          "net_pnl": -733.721573155768,
+          "net_win_rate": 0.12,
+          "net_wins": 6,
+          "outcomes": {
+            "SOURCE_SELL": 40,
+            "TIMEOUT_ASSUMED_LOSS": 10
+          },
+          "rejected": {
+            "confidence": 394,
+            "fee": 47,
+            "risk": 7
+          },
+          "return_fraction": -0.733721573155768
+        },
+        "policy_24h": {
+          "eligible_buys": 498,
+          "executed_buys": 65,
+          "final_cash": 514.2366700122211,
+          "initial_cash": 1000.0,
+          "max_drawdown_at_cost": 0.6475107207873659,
+          "net_pnl": -485.7633299877789,
+          "net_win_rate": 0.2,
+          "net_wins": 13,
+          "outcomes": {
+            "SOURCE_SELL": 55,
+            "TIMEOUT_ASSUMED_LOSS": 10
+          },
+          "rejected": {
+            "confidence": 354,
+            "fee": 77,
+            "risk": 2
+          },
+          "return_fraction": -0.48576332998777894
+        },
+        "policy_vs_bundled": {
+          "calendar_days": 4,
+          "daily_delta_ci95": [
+            -167.68580794520977,
+            475.19185391735584
+          ],
+          "mean_daily_pnl_delta": 87.94019365256017,
+          "positive_lower_bound": false
+        },
+        "policy_vs_fresh_sell_only": {
+          "calendar_days": 4,
+          "daily_delta_ci95": [
+            -62.183904979841216,
+            186.16302656383604
+          ],
+          "mean_daily_pnl_delta": 61.989560791997405,
+          "positive_lower_bound": false
+        }
+      }
+    },
+    "test_buys": 498,
+    "test_outcomes": {
+      "SOURCE_SELL": 292,
+      "TIMEOUT_ASSUMED_LOSS": 206
+    },
+    "training_policy_rows": 11508,
+    "training_sell_only_rows": 9389
+  },
+  "schema": "copy_causal_24h_backtest_v1"
+}

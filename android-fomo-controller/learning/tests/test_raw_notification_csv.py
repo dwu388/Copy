@@ -32,7 +32,7 @@ class RawNotificationCsvTest(unittest.TestCase):
             raw.to_csv(path, index=False)
             output, summary = import_raw_notifications(path)
             output.to_csv(prepared, index=False)
-            valid = load_learning_csv(prepared)
+            valid = load_learning_csv(prepared, require_policy=False)
         self.assertEqual(1, summary["orphan_sells"])
         self.assertEqual(1, summary["duplicates_3m"])
         self.assertEqual(2, summary["resolved_buys"])
