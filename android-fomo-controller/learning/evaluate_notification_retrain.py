@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from sklearn.metrics import brier_score_loss, roc_auc_score
+from learning.policy_labels import reference_net_roi
 
 from learning.core import (
     FEATURES, build_payload, compare_grouped, fit_models, load_learning_csv,
@@ -45,8 +46,8 @@ def main() -> None:
     if not train_before <= val_start < test_start:
         parser.error("Expected train-before <= validation-start < test-start")
     frame = load_learning_csv(args.dataset)
-    train = frame.loc[frame.exit_time.lt(train_before)]
-    validation = frame.loc[frame.entry_time.ge(val_start) & frame.exit_time.lt(test_start)]
+    train = frame.loc[frame.label_available_time.lt(train_before)]
+    validation = frame.loc[frame.entry_time.ge(val_start) & frame.label_available_time.lt(test_start)]
     test = frame.loc[frame.entry_time.ge(test_start)]
     if min(map(len, [train, validation, test])) == 0:
         parser.error("The chronological training, validation, and test periods must each have labels")
@@ -57,22 +58,22 @@ def main() -> None:
     results: dict = {"training_rows": len(train), "training_lifecycles": train.lifecycle_group_id.nunique(),
                      "trained_through_utc": pd.to_datetime(train.exit_time.max(), unit="ms", utc=True).isoformat(),
                      "validation_top_decile_probability_cutoff": probability_cutoff,
-                     "label": "gross sell_market_cap / buy_market_cap - 1",
-                     "net_proxy": "gross ROI minus two max($0.95,0.5% of source_buy_usd/20) fees"}
+                     "label": "24h notification policy; classifier target = positive net reference return",
+                     "net_proxy": "source_buy_usd/20 with separate buy and sell fees; missing timeout quote assumes zero proceeds"}
     for name, part in [("validation", validation), ("test", test)]:
         probabilities = classifier.predict_proba(part[FEATURES])[:, 1]
         n = max(1, round(0.1 * len(part)))
         selected = np.argsort(-probabilities)[:n]
-        gross_wins = int(part.profitable.iloc[selected].sum())
+        gross_wins = int(part.realized_source_roi.iloc[selected].gt(0).sum())
         size = part.source_buy_usd.to_numpy() / 20
-        net_roi = part.realized_source_roi.to_numpy() - 2 * np.maximum(0.95, 0.005 * size) / size
+        net_roi = reference_net_roi(part)
         net_wins = int((net_roi[selected] > 0).sum())
         fixed = probabilities >= probability_cutoff
         fixed_count = int(fixed.sum())
         fixed_net_wins = int((net_roi[fixed] > 0).sum())
         results[name] = {
             "rows": len(part), "lifecycles": part.lifecycle_group_id.nunique(),
-            "gross_base_win_rate": float(part.profitable.mean()),
+            "gross_base_win_rate": float(part.realized_source_roi.gt(0).mean()),
             "net_proxy_base_win_rate": float((net_roi > 0).mean()),
             "auc": float(roc_auc_score(part.profitable, probabilities)),
             "brier": float(brier_score_loss(part.profitable, probabilities)),

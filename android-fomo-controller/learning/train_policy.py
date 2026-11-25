@@ -11,7 +11,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from learning.core import read_payload
+from learning.core import causal_training, read_payload
+from learning.policy_labels import LABEL_CONTRACT, reference_net_roi
 
 
 def fee(value: np.ndarray) -> np.ndarray:
@@ -21,7 +22,7 @@ def fee(value: np.ndarray) -> np.ndarray:
 def utility(frame: pd.DataFrame, threshold: float, ratio: float) -> pd.Series:
     selected = frame["oos_confidence"].ge(threshold).to_numpy()
     size = frame["source_buy_usd"].to_numpy(float) / ratio
-    net = size * frame["realized_source_roi"].to_numpy(float) - 2 * fee(size)
+    net = size * reference_net_roi(frame, ratio)
     return pd.Series(np.where(selected, net / 1_000.0, 0.0), index=frame.index)
 
 
@@ -50,7 +51,9 @@ def main() -> None:
     parser.add_argument("--bootstrap-samples", type=int, default=2000)
     args = parser.parse_args()
     frame = pd.read_csv(args.oos_predictions).sort_values(["exit_time", "entry_time"])
-    required = {"oos_confidence", "oos_predicted_roi", "realized_source_roi", "source_buy_usd", "lifecycle_group_id"}
+    if "label_contract" not in frame or not frame.label_contract.eq(LABEL_CONTRACT).all():
+        raise ValueError("Policy training requires 24-hour-policy cross-fit predictions")
+    required = {"oos_confidence", "oos_predicted_roi", "realized_source_roi", "source_buy_usd", "lifecycle_group_id", "entry_time", "label_available_time"}
     if missing := required - set(frame.columns):
         raise ValueError(f"Cross-fit data is missing {sorted(missing)}")
 
@@ -66,12 +69,14 @@ def main() -> None:
             "trainedThrough": forecast["trainedThrough"],
             "config": forecast["config"],
         }
-    groups = frame.groupby("lifecycle_group_id")["exit_time"].max().sort_values().index.tolist()
+    groups = frame.groupby("lifecycle_group_id")["entry_time"].min().sort_values().index.tolist()
     if len(groups) <= args.holdout_groups + 20:
         raise ValueError("Policy promotion needs training groups plus an untouched holdout")
     holdout_groups = set(groups[-args.holdout_groups:])
-    training = frame.loc[~frame["lifecycle_group_id"].isin(holdout_groups)]
     holdout = frame.loc[frame["lifecycle_group_id"].isin(holdout_groups)]
+    training = causal_training(frame, holdout)
+    if training.lifecycle_group_id.nunique() < 20:
+        raise ValueError("Not enough policy groups whose labels predate holdout buys")
     normal = champion["config"]["modes"]["NORMAL"]
     base_threshold = float(normal["confidence_threshold"])
     base_ratio = max(20.0, float(normal["ratio_floor"]))
@@ -101,13 +106,16 @@ def main() -> None:
     candidate_holdout = utility(holdout, threshold, ratio)
     baseline_holdout = utility(holdout, base_threshold, base_ratio)
     mean_delta, lower = grouped_delta(holdout, candidate_holdout, baseline_holdout, args.bootstrap_samples)
-    promote = lower > 0 and mean_delta >= 0.001
+    # Beating a losing baseline is insufficient: require positive absolute utility.
+    absolute_mean, absolute_lower = grouped_delta(
+        holdout, candidate_holdout, pd.Series(0.0, index=holdout.index), args.bootstrap_samples)
+    promote = lower > 0 and mean_delta >= 0.001 and absolute_lower > 0
 
     challenger = copy.deepcopy(champion)
     challenger.update({
         "schemaVersion": "copy_policy_v1", "policyModelId": policy_id,
         "parentPolicyModelId": champion["policyModelId"],
-        "trainedThrough": datetime.fromtimestamp(float(training["exit_time"].max()) / 1000, timezone.utc).isoformat(),
+        "trainedThrough": datetime.fromtimestamp(float(training["label_available_time"].max()) / 1000, timezone.utc).isoformat(),
     })
     scale = ratio / base_ratio
     for mode in challenger["config"]["modes"].values():
@@ -118,6 +126,7 @@ def main() -> None:
     record.update({
         "status": "PROMOTED" if promote else "REJECTED", "promoted": promote,
         "meanDeltaPer1000": mean_delta, "lowerBoundPer1000": lower,
+        "absoluteMeanPer1000": absolute_mean, "absoluteLowerBoundPer1000": absolute_lower,
     })
     if promote:
         previous = policy_path.parent / "previous.json"

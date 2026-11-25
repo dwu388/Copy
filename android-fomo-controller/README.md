@@ -2,12 +2,19 @@
 
 Prototype Android companion app for running the Fomo notification workflow mostly inside an Android emulator.
 
-Version 0.4.0 adds a **trader win-rate guard** to the existing model and risk
-ladder. Default WARN records low/insufficient-history warnings without changing
-buys; optional FILTER skips entries until the trader's last 20 completed
-reference episodes meet the configured rate. Sells remain enabled. See
-[TRADER_WIN_RATE_GUARD.md](docs/TRADER_WIN_RATE_GUARD.md) for settings, audit
-exports, cold-start behavior, backtest results, and build instructions.
+Version 0.5.0 integrates corrected causal 24-hour training, a locally built calibrated
+**paper-only** model, explicit MODEL / RULE_ONLY selection, hard entry limits,
+a conservative forecast-versus-cost gate and a latched entry-loss pause.
+The paper preset is **market cap < $50,000**, source purchase >= $1,000,
+WARN trader guard and a 20% loss pause. The existing sizing ladder remains.
+The corrected preset abstained in both retrospective windows; cash preservation
+is not evidence of profitable predictions. See [INTEGRATED_PAPER.md](docs/INTEGRATED_PAPER.md)
+for results, limitations and Windows device installation instructions.
+
+The trader win-rate guard retains WARN and optional FILTER modes. See
+[TRADER_WIN_RATE_GUARD.md](docs/TRADER_WIN_RATE_GUARD.md) for its reference
+outcomes and cold-start behavior. That report describes the 0.4 legacy baseline;
+use the integrated comparison for the current preset.
 
 Paper positions now have a **24-hour maximum holding period** in DRY_RUN. A
 recent matching notification supplies a market-cap valuation; without a fresh
@@ -129,7 +136,14 @@ top-decile ranking. Do not tune the cutoff or model after seeing test outcomes
 and then cite that same test as untouched. The exported artifact is experimental,
 not an activated champion. Its `trainedThrough` must precede the holdout.
 
-The raw recorder retains repeated callbacks, so preparation applies the Android three-minute duplicate fingerprint and first-later-sell rules. Open buys remain unknown. Timestamps come from `post_time` (milliseconds UTC), not capture time. Test dates must be later than training dates; evaluate on untouched lifecycles before proposing any champion. The protected recursive promotion loop still consumes the app's separate `copy_learning_opportunities.csv`, with its forecast/policy IDs and one-use cohort registry. K:P workbook rows have no timestamps or lifecycle IDs and cannot directly replace that export.
+Preparation deduplicates callbacks and creates **24-hour policy labels for every
+mature buy**, including assumed losses when no fresh timeout quote is available.
+Recent buys stay pending. Capture times establish availability; source post times
+also constrain quote freshness. Trainers reject legacy sell-only exports. Prepare
+the raw CSV first, then use that prepared dataset for maintenance and cross-fitting.
+The app's separate `copy_learning_opportunities.csv` remains a source-action audit.
+K:P workbook rows lack the timestamps needed for this training contract. See
+[`docs/RECURSIVE_LEARNING.md`](docs/RECURSIVE_LEARNING.md) for migration and backtests.
 
 
 ## Recursive model improvement
@@ -140,8 +154,9 @@ on Windows; Android performs capture, inference, causal outcome recording,
 artifact validation, and atomic activation. New information never directly
 overwrites the active model.
 
-Use **Export recursive-learning CSV** for forecast/policy evidence and **Export
-execution-calibration CSV** for prepare/confirmation/failure timing. See
+Use the **raw notification CSV** to prepare forecast/policy labels, the
+recursive-learning export to audit original predictions/source outcomes, and the
+execution-calibration export for prepare/confirmation/failure timing. See
 `docs/RECURSIVE_LEARNING.md` for the complete training, one-use cohort,
 independent policy promotion, staging, and rollback workflow.
 

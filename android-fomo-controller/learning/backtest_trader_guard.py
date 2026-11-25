@@ -66,9 +66,11 @@ class Quotes:
         return None
 
 
-def simulate(rows, payload, scores, start, mode, threshold, warmup=False, slippage=0, max_cap=None):
+def simulate(rows, payload, scores, start, mode, threshold, warmup=False, slippage=0, max_cap=None,
+             min_source=0, strict_margin=False, loss_limit=None, use_forecast=True):
     guard, quotes = History(), Quotes()
-    wallet = Wallet(payload["config"], payload["roiUncertaintyScale"], slippage)
+    wallet = Wallet(payload["config"], payload["roiUncertaintyScale"], slippage,
+                    strict_margin, use_forecast, loss_limit)
     seen, audit, checks = {}, [], Counter()
     end, sweep = rows[-1]["captured_time"], rows[0]["captured_time"] + 180_000
 
@@ -101,7 +103,7 @@ def simulate(rows, payload, scores, start, mode, threshold, warmup=False, slippa
             continue
         assessment = guard.observe_buy(row["opportunity_id"], row["trader"], row["coin"],
                                        row["source_amount"], row["market_cap"], now, mode, threshold)
-        if now < start or now + HOLD_MS >= end or (max_cap is not None and row["market_cap"] >= max_cap):
+        if now < start or now + HOLD_MS >= end or (max_cap is not None and row["market_cap"] >= max_cap) or row["source_amount"] < min_source:
             continue
         checks[assessment.status] += 1
         audit.append(dict(opportunity_id=row["opportunity_id"], trader=row["trader"],

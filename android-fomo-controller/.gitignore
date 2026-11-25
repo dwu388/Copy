@@ -13,3 +13,6 @@ captures/
 .externalNativeBuild/
 .cxx/
 scripts/fomo-ui.xml
+
+# Locally fitted private-trade paper experiment; package locally, never publish weights.
+/app/src/main/assets/corrected_paper_v1.json.gz

@@ -34,6 +34,12 @@ dataset. OPEN learning opportunities are distinct from paper holdings and may
 remain unresolved until a source SELL is observed. Do not use the old first-sell
 training/backtest results as validation of this new timeout exit policy.
 
+The local trainer now builds a separate `notification_24h_net_reference_v1`
+dataset from raw notifications, covering mature unsold buys and retaining
+timeout assumptions explicitly. Its scheduled capture-time deadline approximates
+this runtime's delayed sweep; it does not reconstruct actual execution times.
+See `RECURSIVE_LEARNING.md` for preparation and `CAUSAL_24H_BACKTEST.md` for results.
+
 ## Reopening the coin
 
 The raw log preserves the original buy notification key, but the original

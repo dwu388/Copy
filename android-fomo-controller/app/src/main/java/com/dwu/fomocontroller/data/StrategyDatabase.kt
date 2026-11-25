@@ -185,6 +185,7 @@ class StrategyDatabase(context: Context) :
             )
             """.trimIndent()
         )
+        createPaperSessions(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -198,6 +199,75 @@ class StrategyDatabase(context: Context) :
                     "DEFAULT 'adaptive_hybrid_v2:mild'"
             )
             createLearningTables(db)
+        }
+        if (oldVersion < 3) createPaperSessions(db)
+    }
+
+    private fun createPaperSessions(db: SQLiteDatabase) {
+        db.execSQL("""CREATE TABLE IF NOT EXISTS paper_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, started_time INTEGER NOT NULL,
+            prior_cash REAL NOT NULL, prior_open_cost REAL NOT NULL, note TEXT NOT NULL)""")
+        db.execSQL("""CREATE TABLE IF NOT EXISTS entry_circuit_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, event_time INTEGER NOT NULL,
+            kind TEXT NOT NULL, peak REAL NOT NULL, estimated_equity REAL NOT NULL,
+            loss_limit REAL NOT NULL, unpriced_positions INTEGER NOT NULL)""")
+    }
+
+    fun recordCircuit(sql: SQLiteDatabase, time: Long, kind: String, peak: Double,
+                      equity: Double, limit: Double, unpriced: Int) {
+        sql.insertOrThrow("entry_circuit_events", null, ContentValues().apply {
+            put("event_time", time); put("kind", kind); put("peak", peak)
+            put("estimated_equity", equity); put("loss_limit", limit); put("unpriced_positions", unpriced)
+        })
+    }
+
+    private fun sessionStart(db: SQLiteDatabase): Long = db.rawQuery(
+        "SELECT COALESCE(MAX(started_time),0) FROM paper_sessions", null
+    ).use { it.moveToFirst(); it.getLong(0) }
+
+    /** Explicit user action. Archive state; do not manufacture a sale or erase raw learning data. */
+    fun startPaperSession(sql: SQLiteDatabase, now: Long, note: String) {
+        val real = sql.rawQuery("SELECT COUNT(*) FROM positions p JOIN plans b " +
+            "ON b.notification_key=p.buy_notification_key WHERE p.status='OPEN' AND b.status='CONFIRMED'", null
+        ).use { it.moveToFirst(); it.getInt(0) }
+        val prepared = sql.rawQuery("SELECT COUNT(*) FROM plans WHERE status='PREPARED'", null
+        ).use { it.moveToFirst(); it.getInt(0) }
+        require(real == 0 && prepared == 0) { "Settle confirmed positions and confirm/reject prepared plans before starting a new paper session." }
+        val prior = loadState(sql, now)
+        sql.insertOrThrow("paper_sessions", null, ContentValues().apply {
+            put("started_time", now); put("prior_cash", prior.cash)
+            put("prior_open_cost", prior.openCost); put("note", note)
+        })
+        val plans = mutableListOf<String>()
+        sql.rawQuery("SELECT notification_key FROM plans WHERE status='PLANNED'", null).use { c ->
+            while (c.moveToNext()) plans += c.getString(0)
+        }
+        plans.forEach { setPlanStatus(sql, it, "CANCELLED_PAPER_SESSION") }
+        sql.execSQL("UPDATE positions SET status='PAPER_SESSION_CLOSED',closed_time=? WHERE status='OPEN'", arrayOf(now))
+        sql.execSQL("UPDATE shadow_lots SET status='SESSION_CLOSED' WHERE status='OPEN'")
+        saveState(sql, RuntimeSnapshot())
+    }
+
+    fun allOpenPositions(sql: SQLiteDatabase): List<StrategyPosition> {
+        val rows = mutableListOf<StrategyPosition>()
+        sql.rawQuery("SELECT id,trader,token,entry_market_cap,principal,opened_time FROM positions WHERE status='OPEN'", null).use { c ->
+            while (c.moveToNext()) rows += StrategyPosition(c.getLong(0), c.getString(1), c.getString(2),
+                c.getDouble(3), c.getDouble(4), c.getLong(5))
+        }
+        return rows
+    }
+
+    fun exportSafetyAudit(directory: File) {
+        directory.mkdirs()
+        for (table in listOf("paper_sessions", "entry_circuit_events")) {
+            readableDatabase.rawQuery("SELECT * FROM $table ORDER BY id", null).use { c ->
+                File(directory, "$table.csv").bufferedWriter().use { out ->
+                    out.appendLine(c.columnNames.joinToString(",") { csv(it) })
+                    while (c.moveToNext()) out.appendLine((0 until c.columnCount).joinToString(",") {
+                        csv(if (c.isNull(it)) "" else c.getString(it))
+                    })
+                }
+            }
         }
     }
 
@@ -270,6 +340,7 @@ class StrategyDatabase(context: Context) :
     }
 
     fun loadState(db: SQLiteDatabase, nowMs: Long): RuntimeSnapshot {
+        val since = sessionStart(db)
         val state = db.rawQuery("SELECT * FROM strategy_state WHERE id=1", null).use { c ->
             check(c.moveToFirst()) { "Missing Adaptive Hybrid strategy state" }
             RuntimeSnapshot(
@@ -284,7 +355,7 @@ class StrategyDatabase(context: Context) :
             )
         }
         db.rawQuery(
-            "SELECT roi FROM shadow_outcomes ORDER BY resolved_time DESC,id DESC LIMIT 20", null
+            "SELECT roi FROM shadow_outcomes WHERE resolved_time>=? ORDER BY resolved_time DESC,id DESC LIMIT 20", arrayOf(since.toString())
         ).use { c ->
             val reverse = mutableListOf<Double>()
             while (c.moveToNext()) reverse += c.getDouble(0)
@@ -292,11 +363,11 @@ class StrategyDatabase(context: Context) :
         }
         db.rawQuery(
             "SELECT entry_time FROM shadow_lots WHERE entry_time>=? ORDER BY entry_time",
-            arrayOf((nowMs - 60 * 60_000L).toString())
+            arrayOf(maxOf(since, nowMs - 60 * 60_000L).toString())
         ).use { c -> while (c.moveToNext()) state.qualifyingSignalTimes += c.getLong(0) }
         db.rawQuery(
-            "SELECT intended_size FROM decisions WHERE intended_size IS NOT NULL " +
-                "ORDER BY created_time DESC LIMIT 10", null
+            "SELECT intended_size FROM decisions WHERE intended_size IS NOT NULL AND created_time>=? " +
+                "ORDER BY created_time DESC LIMIT 10", arrayOf(since.toString())
         ).use { c ->
             val reverse = mutableListOf<Double>()
             while (c.moveToNext()) reverse += c.getDouble(0)
@@ -686,7 +757,7 @@ class StrategyDatabase(context: Context) :
 
     companion object {
         const val DB_NAME = "adaptive_hybrid_v2.db"
-        private const val DB_VERSION = 2
+        private const val DB_VERSION = 3
 
         private fun csv(value: String): String =
             if (value.any { it == ',' || it == '"' || it == '\n' || it == '\r' }) {

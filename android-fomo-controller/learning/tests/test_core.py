@@ -21,7 +21,7 @@ class LearningDataTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "learning.csv"
             row.to_csv(path, index=False)
-            actual = load_learning_csv(path)
+            actual = load_learning_csv(path, require_policy=False)
         self.assertEqual("NA", actual.loc[0, "token"])
 
     def test_unresolved_and_causally_invalid_rows_are_not_training_labels(self) -> None:
@@ -39,7 +39,7 @@ class LearningDataTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "learning.csv"
             rows.to_csv(path, index=False)
-            actual = load_learning_csv(path)
+            actual = load_learning_csv(path, require_policy=False)
         self.assertEqual(["ok"], actual["opportunity_id"].tolist())
 
     def test_bootstrap_uses_lifecycle_groups_not_duplicate_rows(self) -> None:
@@ -53,6 +53,18 @@ class LearningDataTest(unittest.TestCase):
         result = compare_grouped(frame, champion, challenger, bootstrap_samples=100)
         self.assertTrue(result.promote)
         self.assertAlmostEqual(0.2, result.mean_delta)
+
+    def test_losing_less_is_not_sufficient_for_promotion(self) -> None:
+        frame = pd.DataFrame({"lifecycle_group_id": [f"g{i}" for i in range(40)],
+                              "realized_source_roi": -0.2, "profitable": 0})
+        baseline = pd.DataFrame({"probability": 0.5, "predicted_roi": 0.0,
+                                 "confidence": 0.9}, index=frame.index)
+        candidate = baseline.copy()
+        candidate.loc[20:, "confidence"] = 0.0
+        result = compare_grouped(frame, baseline, candidate, bootstrap_samples=500)
+        self.assertGreater(result.lower_bound, 0)
+        self.assertFalse(result.promote)
+        self.assertIn("challenger absolute net utility lower bound is not positive", result.reasons)
 
 
 if __name__ == "__main__":

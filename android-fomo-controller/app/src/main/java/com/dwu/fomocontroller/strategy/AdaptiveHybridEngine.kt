@@ -45,14 +45,21 @@ data class AndroidStrategyDecision(
 object AdaptiveHybridEngine {
     private const val DEDUPE_WINDOW_MS = 3 * 60_000L
 
-    private lateinit var model: AdaptiveHybridModel
-    private lateinit var policyArtifact: PolicyArtifact
+    private lateinit var baseModel: AdaptiveHybridModel
+    private lateinit var basePolicy: PolicyArtifact
+    private var paperModel: AdaptiveHybridModel? = null
+    private var paperPolicy: PolicyArtifact? = null
+    private val paperSelected: Boolean get() = prefs.mode == ControllerMode.DRY_RUN && prefs.paperForecast == PaperForecast.CORRECTED
+    private val model: AdaptiveHybridModel get() = if (paperSelected) paperModel ?: baseModel else baseModel
+    private val policyArtifact: PolicyArtifact get() = if (paperSelected) paperPolicy ?: basePolicy else basePolicy
     private lateinit var championSource: String
     private lateinit var db: StrategyDatabase
     private lateinit var prefs: AppPreferences
     private lateinit var rawDb: EventDatabase
     private lateinit var traderDb: TraderGuardDatabase
     @Volatile private var lastTraderGuard: String? = null
+    @Volatile private var lastRiskEquity = 1000.0
+    @Volatile private var unpricedPositions = 0
     @Volatile private var initialized = false
 
     @Synchronized
@@ -60,11 +67,21 @@ object AdaptiveHybridEngine {
         if (initialized) return
         val app = context.applicationContext
         val champions = ChampionStore.load(app)
-        model = champions.forecast
-        policyArtifact = champions.policy
+        baseModel = champions.forecast
+        basePolicy = champions.policy
         championSource = champions.source
         db = StrategyDatabase(app)
         prefs = AppPreferences(app)
+        runCatching {
+            AdaptiveHybridModel.fromAssets(app, "corrected_paper_v1.json").also {
+                it.validateParity()
+                require(it.labelContract == "notification_24h_net_reference_v1")
+            }
+        }.onSuccess {
+            paperModel = it
+            paperPolicy = PolicyArtifact.bootstrap(requireNotNull(it.config), it.trainedThrough)
+                .copy(policyModelId = "paper_mild_v1")
+        }.onFailure { Log.e("AdaptiveHybridEngine", "Corrected paper model unavailable; MODEL paper entries will be blocked", it) }
         rawDb = EventDatabase(app)
         traderDb = TraderGuardDatabase(app)
         db.transaction(db::cancelOrphanedPlanned)
@@ -121,15 +138,32 @@ object AdaptiveHybridEngine {
                 score.probabilityProfitableExit, score.predictedRoi, score.confidenceRank
             )
 
-            if (score.excluded) {
+            val useForecast = prefs.entryStyle == EntryStyle.MODEL
+            val entryReason = EntrySafety.entryReason(marketCap, sourceAmount, prefs.entryMaxCap, prefs.entryMinSource)
+                ?: (if (!useForecast && prefs.mode != ControllerMode.DRY_RUN) "RULE_ONLY_PAPER_ONLY" else null)
+                ?: (if (useForecast && paperSelected && paperModel == null) "PAPER_MODEL_UNAVAILABLE" else null)
+            if (entryReason != null) {
+                db.saveState(sql, state)
+                return@transaction skipAndRecord(sql, key, "bought", entryReason, trader, token,
+                    marketCap, sourceAmount, nowMs, score, state.mode, guard)
+            }
+
+            if (useForecast && score.excluded) {
                 db.saveState(sql, state)
                 return@transaction skipAndRecord(sql, key, "bought", "EXCLUDED_TRADER", trader, token,
                     marketCap, sourceAmount, nowMs, score, state.mode, guard)
             }
-            if (score.confidenceRank >= config.baseConfidenceThreshold) {
+            if (!useForecast || score.confidenceRank >= config.baseConfidenceThreshold) {
                 db.addShadowLot(sql, key, trader, token, marketCap, score.predictedRoi,
                     score.confidenceRank, nowMs)
                 state.qualifyingSignalTimes += nowMs
+            }
+
+            val circuit = updateCircuit(sql, System.currentTimeMillis())
+            if (circuit.paused) {
+                db.saveState(sql, state)
+                return@transaction skipAndRecord(sql, key, "bought", "LOSS_CIRCUIT_PAUSED", trader, token,
+                    marketCap, sourceAmount, nowMs, score, state.mode, guard)
             }
 
             // Still record every opportunity and qualifying shadow before filtering,
@@ -151,7 +185,7 @@ object AdaptiveHybridEngine {
             val policy = AdaptiveHybridPolicy.chooseBuy(
                 nowMs, trader, token, sourceAmount, score.predictedRoi, score.confidenceRank,
                 reservedState, config, prefs.feeDiscount, model.roiUncertaintyScale,
-                exposure.byTrader, exposure.byToken, exposure.recentEntries
+                exposure.byTrader, exposure.byToken, exposure.recentEntries, useForecast
             )
             val intended = if (policy.reason == "MODE_CONFIDENCE") null else sourceAmount / policy.effectiveRatio
             recordDecision(sql, key, "bought", if (policy.execute) "EXECUTE" else "SKIP", policy.reason,
@@ -277,7 +311,66 @@ object AdaptiveHybridEngine {
     fun status(): StrategyStatus {
         ensureInitialized()
         expirePaperPositions()
+        db.transaction { updateCircuit(it, System.currentTimeMillis()) }
         return db.status()
+    }
+
+    private fun riskEquity(sql: android.database.sqlite.SQLiteDatabase, now: Long): Double {
+        val state = db.loadState(sql, now)
+        var unknown = 0
+        val marked = db.allOpenPositions(sql).sumOf { position ->
+            val cap = rawDb.freshMarketCap(position.trader, position.token, now, PaperExpiry.QUOTE_MAX_AGE_MS)
+            if (cap == null) { unknown++; position.principal } else {
+                val gross = PaperExpiry.gross(position.principal, position.entryMarketCap, cap,
+                    policyArtifact.config.slippagePerSide)
+                minOf(position.principal, max(0.0, gross - AdaptiveHybridPolicy.orderFee(gross, prefs.feeDiscount)))
+            }
+        }
+        unpricedPositions = unknown
+        lastRiskEquity = max(0.0, state.cash + marked)
+        return lastRiskEquity
+    }
+
+    private fun updateCircuit(sql: android.database.sqlite.SQLiteDatabase, now: Long): CircuitState {
+        val state = EntrySafety.circuit(prefs.circuitPeak, riskEquity(sql, now), prefs.entriesPaused, prefs.lossPauseFraction)
+        if (!prefs.entriesPaused && state.paused) db.recordCircuit(sql, now, "PAUSED", state.peak,
+            state.equity, prefs.lossPauseFraction, unpricedPositions)
+        prefs.circuitPeak = state.peak
+        prefs.entriesPaused = state.paused
+        return state
+    }
+
+    fun entrySafetyDescription(): String =
+        "${prefs.entryStyle}; MC < ${prefs.entryMaxCap}; source >= ${prefs.entryMinSource}" +
+        "\nEntries ${if (prefs.entriesPaused) "PAUSED" else "enabled"}; loss limit ${prefs.lossPauseFraction * 100}%" +
+        "; estimated risk equity ${"%.2f".format(java.util.Locale.US, lastRiskEquity)}; unpriced positions=$unpricedPositions"
+
+    @Synchronized
+    fun resumePaperEntries() {
+        ensureInitialized()
+        require(prefs.mode == ControllerMode.DRY_RUN) { "Entry-pause acknowledgement is paper-only." }
+        db.transaction { sql ->
+            val now = System.currentTimeMillis()
+            val equity = riskEquity(sql, now)
+            db.recordCircuit(sql, now, "USER_RESUMED_NEW_ANCHOR", equity, equity, prefs.lossPauseFraction, unpricedPositions)
+            prefs.circuitPeak = equity
+            prefs.entriesPaused = false
+        }
+    }
+
+    @Synchronized
+    fun startNewPaperSession() {
+        ensureInitialized()
+        require(prefs.mode != ControllerMode.PREPARE) { "Switch to OBSERVE and resolve prepared trades first." }
+        if (prefs.paperForecast == PaperForecast.CORRECTED && prefs.entryStyle == EntryStyle.MODEL)
+            require(paperModel != null) { "Corrected paper model is unavailable. Build it locally before packaging the APK, or select LEGACY / RULE_ONLY for a separate paper comparison." }
+        db.transaction { sql ->
+            val now = System.currentTimeMillis()
+            db.startPaperSession(sql, now, "style=${prefs.entryStyle}; forecast=${prefs.paperForecast}; MC<${prefs.entryMaxCap}; source>=${prefs.entryMinSource}")
+            db.recordCircuit(sql, now, "NEW_PAPER_SESSION", 1000.0, 1000.0, prefs.lossPauseFraction, 0)
+        }
+        prefs.circuitPeak = 1000.0
+        prefs.entriesPaused = false
     }
 
     @Synchronized
@@ -292,7 +385,10 @@ object AdaptiveHybridEngine {
         if (prefs.mode != ControllerMode.DRY_RUN) return 0
         return db.transaction { sql ->
             val overdue = db.overduePaperPositions(sql, now - PaperExpiry.MAX_HOLD_MS)
-            if (overdue.isEmpty()) return@transaction 0
+            if (overdue.isEmpty()) {
+                updateCircuit(sql, now)
+                return@transaction 0
+            }
             val state = db.loadState(sql, now)
             for (positions in overdue.groupBy { it.trader.lowercase(java.util.Locale.ROOT) to
                     it.token.lowercase(java.util.Locale.ROOT) }.values) {
@@ -321,6 +417,7 @@ object AdaptiveHybridEngine {
             AdaptiveHybridPolicy.updateStage(state, policyArtifact.config, afterExit = true)
             state.peakEquity = max(state.peakEquity, state.equity())
             db.saveState(sql, state)
+            updateCircuit(sql, now)
             overdue.size
         }
     }
@@ -338,7 +435,9 @@ object AdaptiveHybridEngine {
     @Synchronized
     fun exportTraderGuard(directory: File): Pair<Int, Int> {
         ensureInitialized()
-        return traderDb.export(directory)
+        val result = traderDb.export(directory)
+        db.exportSafetyAudit(directory)
+        return result
     }
 
     fun traderGuardDescription(): String =
@@ -366,7 +465,7 @@ object AdaptiveHybridEngine {
     fun modelDescription(): String {
         ensureInitialized()
         return "${model.modelId} + ${policyArtifact.policyModelId} " +
-            "[$championSource], trained through ${model.trainedThrough}"
+            "[${if (paperSelected) if (paperModel == null) "PAPER MODEL UNAVAILABLE" else "PAPER EXPERIMENT" else championSource}], trained through ${model.trainedThrough}"
     }
 
     private fun executePlan(key: String, finalStatus: String): String {

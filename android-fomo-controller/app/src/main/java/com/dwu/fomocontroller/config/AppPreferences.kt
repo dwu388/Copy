@@ -3,6 +3,8 @@ package com.dwu.fomocontroller.config
 import android.content.Context
 import com.dwu.fomocontroller.model.ControllerMode
 import com.dwu.fomocontroller.strategy.TraderGuardMode
+import com.dwu.fomocontroller.strategy.EntryStyle
+import com.dwu.fomocontroller.strategy.PaperForecast
 
 class AppPreferences(context: Context) {
     private val prefs = context.getSharedPreferences("fomo_controller", Context.MODE_PRIVATE)
@@ -51,4 +53,29 @@ class AppPreferences(context: Context) {
     var traderHistoryInvalid: Boolean
         get() = prefs.getBoolean("traderHistoryInvalid", false)
         set(value) = prefs.edit().putBoolean("traderHistoryInvalid", value).apply()
+
+    var entryMaxCap: Double
+        get() = prefs.getString("entryMaxCap", "50000")?.toDoubleOrNull()
+            ?.takeIf { it.isFinite() && it > 0 } ?: 50000.0
+        set(value) { require(value.isFinite() && value > 0); prefs.edit().putString("entryMaxCap", "$value").apply() }
+    var entryMinSource: Double
+        get() = prefs.getString("entryMinSource", "1000")?.toDoubleOrNull()
+            ?.takeIf { it.isFinite() && it >= 0 } ?: 1000.0
+        set(value) { require(value.isFinite() && value >= 0); prefs.edit().putString("entryMinSource", "$value").apply() }
+    var entryStyle: EntryStyle
+        get() = EntryStyle.entries.firstOrNull { it.name == prefs.getString("entryStyle", "MODEL") } ?: EntryStyle.MODEL
+        set(value) = prefs.edit().putString("entryStyle", value.name).apply()
+    var paperForecast: PaperForecast
+        get() = PaperForecast.entries.firstOrNull { it.name == prefs.getString("paperForecast", "CORRECTED") } ?: PaperForecast.CORRECTED
+        set(value) = prefs.edit().putString("paperForecast", value.name).apply()
+    var lossPauseFraction: Double
+        get() = prefs.getString("lossPauseFraction", "0.20")?.toDoubleOrNull()
+            ?.takeIf { it.isFinite() && it > 0 && it < 1 } ?: .20
+        set(value) { require(value.isFinite() && value > 0 && value < 1); prefs.edit().putString("lossPauseFraction", "$value").apply() }
+    var circuitPeak: Double
+        get() = prefs.getString("circuitPeak", "0")?.toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0 } ?: 0.0
+        set(value) = prefs.edit().putString("circuitPeak", "$value").apply()
+    var entriesPaused: Boolean
+        get() = prefs.getBoolean("entriesPaused", false)
+        set(value) = prefs.edit().putBoolean("entriesPaused", value).apply()
 }

@@ -15,8 +15,14 @@ RATIO_LADDER = [1000, 500, 250, 100, 75, 50, 40, 35, 30, 25, 20, 15, 10]
 
 
 class Wallet:
-    def __init__(self, config: dict, uncertainty: float, slippage: float = 0):
+    def __init__(self, config: dict, uncertainty: float, slippage: float = 0,
+                 strict_margin: bool = False, use_forecast: bool = True,
+                 loss_limit: float | None = None):
         self.cfg, self.uncertainty, self.slippage = config, uncertainty, slippage
+        self.strict_margin, self.use_forecast, self.loss_limit = strict_margin, use_forecast, loss_limit
+        self.circuit_peak, self.entries_paused = 1000.0, False
+        self.circuit_events = []
+        self.quote = None
         self.cash = self.peak = 1000.0
         self.open = self.max_dd = 0.0
         self.stage = self.promotions = self.exits = self.streak = 0
@@ -117,17 +123,20 @@ class Wallet:
         now = row["post_time"]
         self.update_stage()
         self.update_mode()
-        if not math.isfinite(score["probability"]):
+        if self.use_forecast and not math.isfinite(score["probability"]):
             self.skips["excluded"] += 1
             return
-        if score["confidence"] >= self.cfg["base_confidence_threshold"]:
+        if not self.use_forecast or score["confidence"] >= self.cfg["base_confidence_threshold"]:
             self.shadow_lots.append(row)
             self.signals.append(now)
+        if self.loss_limit is not None and self.entries_paused:
+            self.skips["loss_circuit"] += 1
+            return
         if not allowed:
             self.skips["trader_guard"] += 1
             return
         mode = self.cfg["modes"][self.mode]
-        if score["confidence"] < mode["confidence_threshold"]:
+        if self.use_forecast and score["confidence"] < mode["confidence_threshold"]:
             self.skips["confidence"] += 1
             return
         effective = max([20, 15, 10][self.stage], mode["ratio_floor"])
@@ -139,7 +148,9 @@ class Wallet:
             cost = size + fee(size)
             burden = 2 * fee(size) / size + 2 * self.slippage
             conservative = score["predicted_roi"] - mode["uncertainty_multiplier"] * self.uncertainty
-            if burden > mode["fee_burden_trigger"] and conservative < mode["fee_margin_multiple"] * burden:
+            if ((not self.use_forecast and burden > mode["fee_burden_trigger"])
+                    or (self.use_forecast and ((self.strict_margin and conservative <= burden)
+                        or (burden > mode["fee_burden_trigger"] and conservative < mode["fee_margin_multiple"] * burden)))):
                 reasons.add("fee")
                 continue
             e = self.equity() - fee(size)
@@ -210,6 +221,22 @@ class Wallet:
         for (trader, token), positions in groups.items():
             cap = quote(trader, token, now)
             self._close(positions, cap, now, "TIMEOUT_MARK" if cap is not None else "TIMEOUT_ASSUMED_LOSS")
+        if self.loss_limit is not None:
+            unpriced = 0
+            marked = self.cash
+            for p in self.positions:
+                cap = quote(p["row"]["trader"], p["row"]["coin"], now)
+                if cap is None:
+                    marked += p["principal"]
+                    unpriced += 1
+                else:
+                    gross = p["principal"] * cap / p["row"]["market_cap"] * (1-self.slippage)
+                    marked += min(p["principal"], max(0, gross-fee(gross)))
+            self.circuit_peak = max(self.circuit_peak, marked)
+            if (not self.entries_paused and self.circuit_peak > 0
+                    and 1-marked/self.circuit_peak >= self.loss_limit-1e-12):
+                self.entries_paused = True
+                self.circuit_events.append(dict(time=now, equity=marked, peak=self.circuit_peak, unpriced=unpriced))
 
     def report(self):
         assert not self.positions and self.open < 1e-6
@@ -219,4 +246,5 @@ class Wallet:
                     net_win_rate=wins / len(self.ledger) if self.ledger else None,
                     final_cash=self.cash, net_pnl=self.cash - 1000, max_drawdown_at_cost=self.max_dd,
                     ratios=dict(self.ratios), skips=dict(self.skips),
-                    outcomes=dict(Counter(r["outcome"] for r in self.ledger)))
+                    outcomes=dict(Counter(r["outcome"] for r in self.ledger)),
+                    entries_paused=self.entries_paused, circuit_events=self.circuit_events)
