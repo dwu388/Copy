@@ -2,11 +2,13 @@ package com.dwu.fomocontroller.strategy
 
 import android.content.ContentValues
 import android.content.Context
+import android.util.Log
 import com.dwu.fomocontroller.config.AppPreferences
 import com.dwu.fomocontroller.data.StrategyDatabase
 import com.dwu.fomocontroller.data.StrategyPlan
 import com.dwu.fomocontroller.data.StrategyStatus
 import com.dwu.fomocontroller.data.EventDatabase
+import com.dwu.fomocontroller.data.TraderGuardDatabase
 import com.dwu.fomocontroller.model.ControllerMode
 import java.io.File
 import kotlin.math.max
@@ -19,7 +21,8 @@ data class AndroidStrategyDecision(
     val probability: Double? = null,
     val predictedRoi: Double? = null,
     val confidenceRank: Double? = null,
-    val actualRatio: Double? = null
+    val actualRatio: Double? = null,
+    val traderGuard: TraderGuardAssessment? = null
 ) {
     fun auditSummary(): String = buildString {
         append("Adaptive Hybrid v2: ")
@@ -29,6 +32,7 @@ data class AndroidStrategyDecision(
         confidenceRank?.let { append("; confidence=${"%.4f".format(java.util.Locale.US, it)}") }
         predictedRoi?.let { append("; predicted_roi=${"%.4f".format(java.util.Locale.US, it)}") }
         actualRatio?.let { append("; ratio=1:${"%.0f".format(java.util.Locale.US, it)}") }
+        traderGuard?.let { append("; trader_guard=${it.summary()}") }
     }
 }
 
@@ -47,6 +51,8 @@ object AdaptiveHybridEngine {
     private lateinit var db: StrategyDatabase
     private lateinit var prefs: AppPreferences
     private lateinit var rawDb: EventDatabase
+    private lateinit var traderDb: TraderGuardDatabase
+    @Volatile private var lastTraderGuard: String? = null
     @Volatile private var initialized = false
 
     @Synchronized
@@ -60,6 +66,7 @@ object AdaptiveHybridEngine {
         db = StrategyDatabase(app)
         prefs = AppPreferences(app)
         rawDb = EventDatabase(app)
+        traderDb = TraderGuardDatabase(app)
         db.transaction(db::cancelOrphanedPlanned)
         initialized = true
         expirePaperPositions()
@@ -98,6 +105,11 @@ object AdaptiveHybridEngine {
                     marketCap, sourceAmount, nowMs, null, null)
             }
             db.recordSeen(sql, key, fingerprint, nowMs)
+            val guard = if (prefs.traderHistoryInvalid) unavailableTraderGuard() else runCatching {
+                traderDb.observeBuy(key, nowMs, trader, token, marketCap, sourceAmount,
+                    System.currentTimeMillis(), prefs.traderGuardMode, prefs.traderMinimumWinRate)
+            }.getOrElse { error -> traderHistoryFailed(error); unavailableTraderGuard() }
+            lastTraderGuard = "$trader: ${guard.summary()}"
             var state = db.loadState(sql, nowMs)
             val config = policyArtifact.config
             AdaptiveHybridPolicy.updateStage(state, config, afterExit = false)
@@ -112,12 +124,20 @@ object AdaptiveHybridEngine {
             if (score.excluded) {
                 db.saveState(sql, state)
                 return@transaction skipAndRecord(sql, key, "bought", "EXCLUDED_TRADER", trader, token,
-                    marketCap, sourceAmount, nowMs, score, state.mode)
+                    marketCap, sourceAmount, nowMs, score, state.mode, guard)
             }
             if (score.confidenceRank >= config.baseConfidenceThreshold) {
                 db.addShadowLot(sql, key, trader, token, marketCap, score.predictedRoi,
                     score.confidenceRank, nowMs)
                 state.qualifyingSignalTimes += nowMs
+            }
+
+            // Still record every opportunity and qualifying shadow before filtering,
+            // so a blocked trader can accumulate new evidence and recover eligibility.
+            if (!guard.allowed) {
+                db.saveState(sql, state)
+                return@transaction skipAndRecord(sql, key, "bought", "TRADER_WIN_RATE_${guard.status}",
+                    trader, token, marketCap, sourceAmount, nowMs, score, state.mode, guard)
             }
 
             val exposure = db.exposure(sql, nowMs)
@@ -151,7 +171,7 @@ object AdaptiveHybridEngine {
             AndroidStrategyDecision(
                 policy.execute, policy.reason, policy.copyUsd, state.mode,
                 score.probabilityProfitableExit, score.predictedRoi, score.confidenceRank,
-                policy.actualRatio
+                policy.actualRatio, guard
             )
         }
     }
@@ -166,6 +186,11 @@ object AdaptiveHybridEngine {
                 marketCap, sourceAmount, nowMs, null, null)
         }
         db.recordSeen(sql, key, fingerprint, nowMs)
+        // Eligibility only applies to entries; sells always update history and
+        // retain the existing confirmed-position exit path.
+        if (!prefs.traderHistoryInvalid) runCatching {
+            traderDb.observeSell(key, trader, token, marketCap, System.currentTimeMillis())
+        }.onFailure(::traderHistoryFailed)
         val state = db.loadState(sql, nowMs)
         val config = policyArtifact.config
         db.resolveLearningOpportunities(sql, key, trader, token, marketCap, nowMs)
@@ -258,6 +283,12 @@ object AdaptiveHybridEngine {
     @Synchronized
     fun expirePaperPositions(now: Long = System.currentTimeMillis()): Int {
         ensureInitialized()
+        // Independent observational history also advances in OBSERVE/PREPARE.
+        if (!prefs.traderHistoryInvalid) runCatching {
+            traderDb.expire(now) { trader, token ->
+                rawDb.freshMarketCap(trader, token, now, TraderWinRateGuard.QUOTE_AGE_MS)
+            }
+        }.onFailure(::traderHistoryFailed)
         if (prefs.mode != ControllerMode.DRY_RUN) return 0
         return db.transaction { sql ->
             val overdue = db.overduePaperPositions(sql, now - PaperExpiry.MAX_HOLD_MS)
@@ -302,6 +333,34 @@ object AdaptiveHybridEngine {
     fun exportExecutionCsv(destination: File): Int {
         ensureInitialized()
         return db.exportExecutionCsv(destination)
+    }
+
+    @Synchronized
+    fun exportTraderGuard(directory: File): Pair<Int, Int> {
+        ensureInitialized()
+        return traderDb.export(directory)
+    }
+
+    fun traderGuardDescription(): String =
+        "${prefs.traderGuardMode}: last ${TraderWinRateGuard.WINDOW} episodes, minimum " +
+            "${"%.1f".format(java.util.Locale.US, prefs.traderMinimumWinRate * 100)}%" +
+            (lastTraderGuard?.let { "\nLast trader check: $it" } ?: "\nHistory starts with this update.") +
+            (if (prefs.traderHistoryInvalid) "\nHistory unavailable; reset it to collect a new trusted window." else "")
+
+    private fun unavailableTraderGuard() = TraderGuardAssessment(prefs.traderGuardMode,
+        "UNAVAILABLE", TraderGuardStats(0, 0), prefs.traderMinimumWinRate)
+
+    private fun traderHistoryFailed(error: Throwable) {
+        prefs.traderHistoryInvalid = true
+        Log.e("AdaptiveHybridEngine", "Trader history unavailable; entries follow guard mode, sells remain enabled", error)
+    }
+
+    @Synchronized
+    fun resetTraderHistory() {
+        ensureInitialized()
+        traderDb.reset()
+        prefs.traderHistoryInvalid = false
+        lastTraderGuard = null
     }
 
     fun modelDescription(): String {
@@ -358,13 +417,15 @@ object AdaptiveHybridEngine {
         sourceAmount: Double,
         nowMs: Long,
         score: HybridScore?,
-        mode: String?
+        mode: String?,
+        guard: TraderGuardAssessment? = null
     ): AndroidStrategyDecision {
         val currentMode = mode ?: db.loadState(sql, nowMs).mode
         recordDecision(sql, key, action, "SKIP", reason, currentMode, trader, token,
             marketCap, sourceAmount, nowMs, score, null, null, "NOT_APPLICABLE")
         return AndroidStrategyDecision(false, reason, null, currentMode,
-            score?.probabilityProfitableExit, score?.predictedRoi, score?.confidenceRank)
+            score?.probabilityProfitableExit, score?.predictedRoi, score?.confidenceRank,
+            traderGuard = guard)
     }
 
     private fun recordDecision(

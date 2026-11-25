@@ -2,6 +2,13 @@
 
 Prototype Android companion app for running the Fomo notification workflow mostly inside an Android emulator.
 
+Version 0.4.0 adds a **trader win-rate guard** to the existing model and risk
+ladder. Default WARN records low/insufficient-history warnings without changing
+buys; optional FILTER skips entries until the trader's last 20 completed
+reference episodes meet the configured rate. Sells remain enabled. See
+[TRADER_WIN_RATE_GUARD.md](docs/TRADER_WIN_RATE_GUARD.md) for settings, audit
+exports, cold-start behavior, backtest results, and build instructions.
+
 Paper positions now have a **24-hour maximum holding period** in DRY_RUN. A
 recent matching notification supplies a market-cap valuation; without a fresh
 usable quote the paper position is closed at zero proceeds with an explicit

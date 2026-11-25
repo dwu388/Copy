@@ -2,6 +2,7 @@ package com.dwu.fomocontroller.config
 
 import android.content.Context
 import com.dwu.fomocontroller.model.ControllerMode
+import com.dwu.fomocontroller.strategy.TraderGuardMode
 
 class AppPreferences(context: Context) {
     private val prefs = context.getSharedPreferences("fomo_controller", Context.MODE_PRIVATE)
@@ -34,4 +35,20 @@ class AppPreferences(context: Context) {
             require(value == 0.0 || value == 0.10)
             prefs.edit().putString("feeDiscount", value.toString()).apply()
         }
+
+    var traderGuardMode: TraderGuardMode
+        get() = TraderGuardMode.from(prefs.getString("traderGuardMode", "WARN"))
+        set(value) = prefs.edit().putString("traderGuardMode", value.name).apply()
+
+    var traderMinimumWinRate: Double
+        get() = prefs.getString("traderMinimumWinRate", "0.50")?.toDoubleOrNull()
+            ?.takeIf { it.isFinite() && it in 0.0..1.0 } ?: 0.50
+        set(value) {
+            require(value.isFinite() && value in 0.0..1.0)
+            prefs.edit().putString("traderMinimumWinRate", value.toString()).apply()
+        }
+
+    var traderHistoryInvalid: Boolean
+        get() = prefs.getBoolean("traderHistoryInvalid", false)
+        set(value) = prefs.edit().putBoolean("traderHistoryInvalid", value).apply()
 }

@@ -23,6 +23,7 @@ import com.dwu.fomocontroller.config.AppPreferences
 import com.dwu.fomocontroller.data.EventDatabase
 import com.dwu.fomocontroller.model.ControllerMode
 import com.dwu.fomocontroller.strategy.AdaptiveHybridEngine
+import com.dwu.fomocontroller.strategy.TraderGuardMode
 import java.io.File
 import java.text.DateFormat
 import java.util.Date
@@ -33,6 +34,8 @@ class MainActivity : Activity() {
 
     private lateinit var modeSpinner: Spinner
     private lateinit var feeSpinner: Spinner
+    private lateinit var traderGuardSpinner: Spinner
+    private lateinit var traderRateInput: EditText
     private lateinit var maxAgeInput: EditText
     private lateinit var statusView: TextView
     private lateinit var recorderView: TextView
@@ -100,6 +103,22 @@ class MainActivity : Activity() {
             )
         }
         root.addView(feeSpinner)
+
+        root.addView(label("Trader win-rate guard"))
+        traderGuardSpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
+                listOf("OFF", "WARN — keep existing buy decisions", "FILTER — skip low/unknown histories"))
+        }
+        root.addView(traderGuardSpinner)
+        traderRateInput = numberInput()
+        root.addView(label("Minimum recent net win rate (%)"))
+        root.addView(traderRateInput)
+        root.addView(TextView(this).apply {
+            text = "Last 20 completed source-trade episodes, including skipped buys and 24h timeout assumptions. " +
+                "Standard fees at a reference 1:20 size. History starts with this update; " +
+                "FILTER skips traders until 20 episodes are known. Sells are never blocked."
+            textSize = 13f
+        })
 
         maxAgeInput = numberInput()
         root.addView(label("Maximum event age (seconds)"))
@@ -184,6 +203,36 @@ class MainActivity : Activity() {
         })
 
         root.addView(Button(this).apply {
+            text = "Export trader win-rate audit"
+            setOnClickListener {
+                val directory = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
+                    ?: File(filesDir, "exports")
+                Thread {
+                    runCatching { AdaptiveHybridEngine.exportTraderGuard(directory) }
+                        .onSuccess { (checks, episodes) -> runOnUiThread {
+                            Toast.makeText(this@MainActivity,
+                                "Exported $checks trader checks and $episodes outcomes to $directory",
+                                Toast.LENGTH_LONG).show()
+                        } }
+                        .onFailure { error -> runOnUiThread {
+                            Toast.makeText(this@MainActivity, "Trader export failed: ${error.message}",
+                                Toast.LENGTH_LONG).show()
+                        } }
+                }.start()
+            }
+        })
+
+        root.addView(Button(this).apply {
+            text = "Reset trader history (FILTER waits for 20 new episodes)"
+            setOnClickListener {
+                runCatching { AdaptiveHybridEngine.resetTraderHistory() }
+                    .onSuccess { refreshStatus() }
+                    .onFailure { error -> Toast.makeText(this@MainActivity,
+                        "Trader reset failed: ${error.message}", Toast.LENGTH_LONG).show() }
+            }
+        })
+
+        root.addView(Button(this).apply {
             text = "Refresh events"
             setOnClickListener { refresh() }
         })
@@ -229,19 +278,29 @@ class MainActivity : Activity() {
     private fun loadSettingsIntoUi() {
         modeSpinner.setSelection(ControllerMode.entries.indexOf(prefs.mode))
         feeSpinner.setSelection(if (prefs.feeDiscount == 0.10) 1 else 0)
+        traderGuardSpinner.setSelection(TraderGuardMode.entries.indexOf(prefs.traderGuardMode))
+        traderRateInput.setText((prefs.traderMinimumWinRate * 100).toString())
         maxAgeInput.setText(prefs.maxEventAgeSeconds.toString())
     }
 
     private fun saveSettings() {
         val maxAge = maxAgeInput.text.toString().toLongOrNull()
+        val traderRate = traderRateInput.text.toString().toDoubleOrNull()
 
         if (maxAge == null || maxAge <= 0L) {
             Toast.makeText(this, "Enter a positive maximum event age.", Toast.LENGTH_LONG).show()
             return
         }
 
+        if (traderRate == null || !traderRate.isFinite() || traderRate !in 0.0..100.0) {
+            Toast.makeText(this, "Enter a trader win rate from 0 to 100%.", Toast.LENGTH_LONG).show()
+            return
+        }
+
         prefs.feeDiscount = if (feeSpinner.selectedItemPosition == 1) 0.10 else 0.0
         prefs.maxEventAgeSeconds = maxAge
+        prefs.traderGuardMode = TraderGuardMode.entries[traderGuardSpinner.selectedItemPosition]
+        prefs.traderMinimumWinRate = traderRate / 100.0
         Toast.makeText(this, "Settings saved.", Toast.LENGTH_SHORT).show()
         refreshStatus()
     }
@@ -388,6 +447,8 @@ class MainActivity : Activity() {
             append(prefs.mode.name)
             append("\nModel: ")
             append(AdaptiveHybridEngine.modelDescription())
+            append("\nTrader guard: ")
+            append(AdaptiveHybridEngine.traderGuardDescription())
             append("\nStrategy: mode=")
             append(strategy.mode)
             append(" stage=")
