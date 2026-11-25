@@ -1,0 +1,861 @@
+{
+  "assumptions": [
+    "Each portfolio starts independently at $1000; bundled model and policy unchanged.",
+    "OFF and WARN must have identical copied trades, sizing and cash.",
+    "FILTER uses 20 completed all-market-cap reference episodes and frozen 40%/50% cutoffs.",
+    "Latest starts cold, matching an update without backfill. No history crosses the unobserved export gap.",
+    "Older warmup variant uses only earlier rows within the same export.",
+    "Immediate notification-cap fills, standard fees, no UI latency/reservations/failures.",
+    "Three-minute plus notification/status sweeps approximate Android; suspension is unknown.",
+    "Missing fresh quotes are assumed write-offs, not verified losses; ticker identity is ambiguous.",
+    "Paper slippage matches main: exit haircut and two-side burden in entry gate.",
+    "Only full-24h-observed buys enter portfolios; all observed buys can update guard history.",
+    "Latest data was already inspected; retrospective comparison, not an untouched forward trial."
+  ],
+  "model": "adaptive_hybrid_v2",
+  "periods": {
+    "latest": {
+      "cold": {
+        "slippage_0": {
+          "FILTER_40%": {
+            "copied_buys": 13,
+            "eligible_buys": 498,
+            "final_cash": 850.8144438122894,
+            "guard_episode_count": 406,
+            "guard_history": "cold start at portfolio start",
+            "guard_status_counts": {
+              "INSUFFICIENT": 376,
+              "LOW": 73,
+              "PASS": 49
+            },
+            "max_drawdown_at_cost": 0.14918555618771068,
+            "mode": "FILTER",
+            "net_pnl": -149.18555618771063,
+            "net_win_rate": 0.07692307692307693,
+            "net_wins": 1,
+            "outcomes": {
+              "SOURCE_SELL": 8,
+              "TIMEOUT_ASSUMED_LOSS": 5
+            },
+            "ratios": {
+              "1:20": 13
+            },
+            "skips": {
+              "confidence": 26,
+              "fee": 10,
+              "trader_guard": 449
+            },
+            "threshold": 0.4
+          },
+          "FILTER_50%": {
+            "copied_buys": 0,
+            "eligible_buys": 498,
+            "final_cash": 1000.0,
+            "guard_episode_count": 406,
+            "guard_history": "cold start at portfolio start",
+            "guard_status_counts": {
+              "INSUFFICIENT": 376,
+              "LOW": 122
+            },
+            "max_drawdown_at_cost": 0.0,
+            "mode": "FILTER",
+            "net_pnl": 0.0,
+            "net_win_rate": null,
+            "net_wins": 0,
+            "outcomes": {},
+            "ratios": {},
+            "skips": {
+              "trader_guard": 498
+            },
+            "threshold": 0.5
+          },
+          "OFF": {
+            "copied_buys": 53,
+            "eligible_buys": 498,
+            "final_cash": 313.6678500388007,
+            "guard_episode_count": 406,
+            "guard_history": "cold start at portfolio start",
+            "guard_status_counts": {
+              "OFF": 498
+            },
+            "max_drawdown_at_cost": 0.6863321499611994,
+            "mode": "OFF",
+            "net_pnl": -686.3321499611993,
+            "net_win_rate": 0.18867924528301888,
+            "net_wins": 10,
+            "outcomes": {
+              "SOURCE_SELL": 43,
+              "TIMEOUT_ASSUMED_LOSS": 10
+            },
+            "ratios": {
+              "1:20": 39,
+              "1:25": 12,
+              "1:30": 1,
+              "1:35": 1
+            },
+            "skips": {
+              "concentration+fee": 7,
+              "concentration+liquidity": 2,
+              "confidence": 359,
+              "fee": 70,
+              "fee+liquidity": 7
+            },
+            "threshold": 0.5
+          },
+          "WARN": {
+            "copied_buys": 53,
+            "eligible_buys": 498,
+            "final_cash": 313.6678500388007,
+            "guard_episode_count": 406,
+            "guard_history": "cold start at portfolio start",
+            "guard_status_counts": {
+              "INSUFFICIENT": 376,
+              "LOW": 122
+            },
+            "max_drawdown_at_cost": 0.6863321499611994,
+            "mode": "WARN",
+            "net_pnl": -686.3321499611993,
+            "net_win_rate": 0.18867924528301888,
+            "net_wins": 10,
+            "outcomes": {
+              "SOURCE_SELL": 43,
+              "TIMEOUT_ASSUMED_LOSS": 10
+            },
+            "ratios": {
+              "1:20": 39,
+              "1:25": 12,
+              "1:30": 1,
+              "1:35": 1
+            },
+            "skips": {
+              "concentration+fee": 7,
+              "concentration+liquidity": 2,
+              "confidence": 359,
+              "fee": 70,
+              "fee+liquidity": 7
+            },
+            "threshold": 0.5
+          }
+        },
+        "slippage_0.01": {
+          "FILTER_40%": {
+            "copied_buys": 12,
+            "eligible_buys": 498,
+            "final_cash": 867.4313378357051,
+            "guard_episode_count": 406,
+            "guard_history": "cold start at portfolio start",
+            "guard_status_counts": {
+              "INSUFFICIENT": 376,
+              "LOW": 73,
+              "PASS": 49
+            },
+            "max_drawdown_at_cost": 0.13256866216429486,
+            "mode": "FILTER",
+            "net_pnl": -132.5686621642949,
+            "net_win_rate": 0.08333333333333333,
+            "net_wins": 1,
+            "outcomes": {
+              "SOURCE_SELL": 7,
+              "TIMEOUT_ASSUMED_LOSS": 5
+            },
+            "ratios": {
+              "1:20": 12
+            },
+            "skips": {
+              "confidence": 26,
+              "fee": 11,
+              "trader_guard": 449
+            },
+            "threshold": 0.4
+          },
+          "FILTER_50%": {
+            "copied_buys": 0,
+            "eligible_buys": 498,
+            "final_cash": 1000.0,
+            "guard_episode_count": 406,
+            "guard_history": "cold start at portfolio start",
+            "guard_status_counts": {
+              "INSUFFICIENT": 376,
+              "LOW": 122
+            },
+            "max_drawdown_at_cost": 0.0,
+            "mode": "FILTER",
+            "net_pnl": 0.0,
+            "net_win_rate": null,
+            "net_wins": 0,
+            "outcomes": {},
+            "ratios": {},
+            "skips": {
+              "trader_guard": 498
+            },
+            "threshold": 0.5
+          },
+          "OFF": {
+            "copied_buys": 49,
+            "eligible_buys": 498,
+            "final_cash": 370.9830028297193,
+            "guard_episode_count": 406,
+            "guard_history": "cold start at portfolio start",
+            "guard_status_counts": {
+              "OFF": 498
+            },
+            "max_drawdown_at_cost": 0.6290169971702807,
+            "mode": "OFF",
+            "net_pnl": -629.0169971702808,
+            "net_win_rate": 0.1836734693877551,
+            "net_wins": 9,
+            "outcomes": {
+              "SOURCE_SELL": 42,
+              "TIMEOUT_ASSUMED_LOSS": 7
+            },
+            "ratios": {
+              "1:20": 30,
+              "1:25": 18,
+              "1:40": 1
+            },
+            "skips": {
+              "concentration+fee": 7,
+              "concentration+liquidity": 2,
+              "confidence": 359,
+              "fee": 78,
+              "fee+liquidity": 3
+            },
+            "threshold": 0.5
+          },
+          "WARN": {
+            "copied_buys": 49,
+            "eligible_buys": 498,
+            "final_cash": 370.9830028297193,
+            "guard_episode_count": 406,
+            "guard_history": "cold start at portfolio start",
+            "guard_status_counts": {
+              "INSUFFICIENT": 376,
+              "LOW": 122
+            },
+            "max_drawdown_at_cost": 0.6290169971702807,
+            "mode": "WARN",
+            "net_pnl": -629.0169971702808,
+            "net_win_rate": 0.1836734693877551,
+            "net_wins": 9,
+            "outcomes": {
+              "SOURCE_SELL": 42,
+              "TIMEOUT_ASSUMED_LOSS": 7
+            },
+            "ratios": {
+              "1:20": 30,
+              "1:25": 18,
+              "1:40": 1
+            },
+            "skips": {
+              "concentration+fee": 7,
+              "concentration+liquidity": 2,
+              "confidence": 359,
+              "fee": 78,
+              "fee+liquidity": 3
+            },
+            "threshold": 0.5
+          }
+        }
+      }
+    },
+    "older": {
+      "cold": {
+        "slippage_0": {
+          "FILTER_40%": {
+            "copied_buys": 155,
+            "eligible_buys": 3731,
+            "final_cash": 1682.671212627353,
+            "guard_episode_count": 2451,
+            "guard_history": "cold start at portfolio start",
+            "guard_status_counts": {
+              "INSUFFICIENT": 1464,
+              "LOW": 1443,
+              "PASS": 824
+            },
+            "max_drawdown_at_cost": 0.08609384407931586,
+            "mode": "FILTER",
+            "net_pnl": 682.671212627353,
+            "net_win_rate": 0.5612903225806452,
+            "net_wins": 87,
+            "outcomes": {
+              "SOURCE_SELL": 139,
+              "TIMEOUT_ASSUMED_LOSS": 16
+            },
+            "ratios": {
+              "1:20": 132,
+              "1:25": 20,
+              "1:500": 1,
+              "1:75": 2
+            },
+            "skips": {
+              "concentration+fee": 4,
+              "confidence": 503,
+              "fee": 162,
+              "trader_guard": 2907
+            },
+            "threshold": 0.4
+          },
+          "FILTER_50%": {
+            "copied_buys": 109,
+            "eligible_buys": 3731,
+            "final_cash": 1533.9756207870857,
+            "guard_episode_count": 2451,
+            "guard_history": "cold start at portfolio start",
+            "guard_status_counts": {
+              "INSUFFICIENT": 1464,
+              "LOW": 1700,
+              "PASS": 567
+            },
+            "max_drawdown_at_cost": 0.08569348898769558,
+            "mode": "FILTER",
+            "net_pnl": 533.9756207870857,
+            "net_win_rate": 0.6146788990825688,
+            "net_wins": 67,
+            "outcomes": {
+              "SOURCE_SELL": 98,
+              "TIMEOUT_ASSUMED_LOSS": 11
+            },
+            "ratios": {
+              "1:20": 98,
+              "1:25": 11
+            },
+            "skips": {
+              "confidence": 344,
+              "fee": 114,
+              "trader_guard": 3164
+            },
+            "threshold": 0.5
+          },
+          "OFF": {
+            "copied_buys": 115,
+            "eligible_buys": 3731,
+            "final_cash": 99.48031372510538,
+            "guard_episode_count": 2451,
+            "guard_history": "cold start at portfolio start",
+            "guard_status_counts": {
+              "OFF": 3731
+            },
+            "max_drawdown_at_cost": 0.9460009878086946,
+            "mode": "OFF",
+            "net_pnl": -900.5196862748946,
+            "net_win_rate": 0.4260869565217391,
+            "net_wins": 49,
+            "outcomes": {
+              "SOURCE_SELL": 80,
+              "TIMEOUT_ASSUMED_LOSS": 35
+            },
+            "ratios": {
+              "1:100": 1,
+              "1:1000": 1,
+              "1:20": 31,
+              "1:25": 45,
+              "1:250": 2,
+              "1:30": 13,
+              "1:35": 11,
+              "1:40": 6,
+              "1:50": 3,
+              "1:500": 1,
+              "1:75": 1
+            },
+            "skips": {
+              "concentration+fee": 147,
+              "concentration+fee+liquidity": 17,
+              "confidence": 3021,
+              "fee": 413,
+              "fee+liquidity": 15,
+              "liquidity": 3
+            },
+            "threshold": 0.5
+          },
+          "WARN": {
+            "copied_buys": 115,
+            "eligible_buys": 3731,
+            "final_cash": 99.48031372510538,
+            "guard_episode_count": 2451,
+            "guard_history": "cold start at portfolio start",
+            "guard_status_counts": {
+              "INSUFFICIENT": 1464,
+              "LOW": 1700,
+              "PASS": 567
+            },
+            "max_drawdown_at_cost": 0.9460009878086946,
+            "mode": "WARN",
+            "net_pnl": -900.5196862748946,
+            "net_win_rate": 0.4260869565217391,
+            "net_wins": 49,
+            "outcomes": {
+              "SOURCE_SELL": 80,
+              "TIMEOUT_ASSUMED_LOSS": 35
+            },
+            "ratios": {
+              "1:100": 1,
+              "1:1000": 1,
+              "1:20": 31,
+              "1:25": 45,
+              "1:250": 2,
+              "1:30": 13,
+              "1:35": 11,
+              "1:40": 6,
+              "1:50": 3,
+              "1:500": 1,
+              "1:75": 1
+            },
+            "skips": {
+              "concentration+fee": 147,
+              "concentration+fee+liquidity": 17,
+              "confidence": 3021,
+              "fee": 413,
+              "fee+liquidity": 15,
+              "liquidity": 3
+            },
+            "threshold": 0.5
+          }
+        },
+        "slippage_0.01": {
+          "FILTER_40%": {
+            "copied_buys": 138,
+            "eligible_buys": 3731,
+            "final_cash": 1477.9046397764905,
+            "guard_episode_count": 2451,
+            "guard_history": "cold start at portfolio start",
+            "guard_status_counts": {
+              "INSUFFICIENT": 1464,
+              "LOW": 1443,
+              "PASS": 824
+            },
+            "max_drawdown_at_cost": 0.11257752476622385,
+            "mode": "FILTER",
+            "net_pnl": 477.9046397764905,
+            "net_win_rate": 0.5652173913043478,
+            "net_wins": 78,
+            "outcomes": {
+              "SOURCE_SELL": 123,
+              "TIMEOUT_ASSUMED_LOSS": 15
+            },
+            "ratios": {
+              "1:100": 1,
+              "1:20": 116,
+              "1:25": 20,
+              "1:75": 1
+            },
+            "skips": {
+              "concentration+fee": 4,
+              "concentration+fee+liquidity": 1,
+              "confidence": 504,
+              "fee": 177,
+              "trader_guard": 2907
+            },
+            "threshold": 0.4
+          },
+          "FILTER_50%": {
+            "copied_buys": 97,
+            "eligible_buys": 3731,
+            "final_cash": 1494.2289732418844,
+            "guard_episode_count": 2451,
+            "guard_history": "cold start at portfolio start",
+            "guard_status_counts": {
+              "INSUFFICIENT": 1464,
+              "LOW": 1700,
+              "PASS": 567
+            },
+            "max_drawdown_at_cost": 0.10238003029552756,
+            "mode": "FILTER",
+            "net_pnl": 494.22897324188443,
+            "net_win_rate": 0.5979381443298969,
+            "net_wins": 58,
+            "outcomes": {
+              "SOURCE_SELL": 88,
+              "TIMEOUT_ASSUMED_LOSS": 9
+            },
+            "ratios": {
+              "1:20": 86,
+              "1:25": 11
+            },
+            "skips": {
+              "confidence": 348,
+              "fee": 122,
+              "trader_guard": 3164
+            },
+            "threshold": 0.5
+          },
+          "OFF": {
+            "copied_buys": 200,
+            "eligible_buys": 3731,
+            "final_cash": 690.9452156850995,
+            "guard_episode_count": 2451,
+            "guard_history": "cold start at portfolio start",
+            "guard_status_counts": {
+              "OFF": 3731
+            },
+            "max_drawdown_at_cost": 0.8071624521193537,
+            "mode": "OFF",
+            "net_pnl": -309.05478431490053,
+            "net_win_rate": 0.47,
+            "net_wins": 94,
+            "outcomes": {
+              "SOURCE_SELL": 167,
+              "TIMEOUT_ASSUMED_LOSS": 33
+            },
+            "ratios": {
+              "1:100": 1,
+              "1:20": 28,
+              "1:25": 156,
+              "1:250": 2,
+              "1:30": 5,
+              "1:35": 4,
+              "1:50": 3,
+              "1:500": 1
+            },
+            "skips": {
+              "concentration+fee": 22,
+              "concentration+fee+liquidity": 13,
+              "concentration+liquidity": 1,
+              "confidence": 3021,
+              "fee": 474
+            },
+            "threshold": 0.5
+          },
+          "WARN": {
+            "copied_buys": 200,
+            "eligible_buys": 3731,
+            "final_cash": 690.9452156850995,
+            "guard_episode_count": 2451,
+            "guard_history": "cold start at portfolio start",
+            "guard_status_counts": {
+              "INSUFFICIENT": 1464,
+              "LOW": 1700,
+              "PASS": 567
+            },
+            "max_drawdown_at_cost": 0.8071624521193537,
+            "mode": "WARN",
+            "net_pnl": -309.05478431490053,
+            "net_win_rate": 0.47,
+            "net_wins": 94,
+            "outcomes": {
+              "SOURCE_SELL": 167,
+              "TIMEOUT_ASSUMED_LOSS": 33
+            },
+            "ratios": {
+              "1:100": 1,
+              "1:20": 28,
+              "1:25": 156,
+              "1:250": 2,
+              "1:30": 5,
+              "1:35": 4,
+              "1:50": 3,
+              "1:500": 1
+            },
+            "skips": {
+              "concentration+fee": 22,
+              "concentration+fee+liquidity": 13,
+              "concentration+liquidity": 1,
+              "confidence": 3021,
+              "fee": 474
+            },
+            "threshold": 0.5
+          }
+        }
+      },
+      "warm": {
+        "slippage_0": {
+          "FILTER_40%": {
+            "copied_buys": 142,
+            "eligible_buys": 3731,
+            "final_cash": 1366.3909681354658,
+            "guard_episode_count": 7652,
+            "guard_history": "same-export warmup",
+            "guard_status_counts": {
+              "INSUFFICIENT": 539,
+              "LOW": 2258,
+              "PASS": 934
+            },
+            "max_drawdown_at_cost": 0.2067569933041583,
+            "mode": "FILTER",
+            "net_pnl": 366.39096813546576,
+            "net_win_rate": 0.5633802816901409,
+            "net_wins": 80,
+            "outcomes": {
+              "SOURCE_SELL": 125,
+              "TIMEOUT_ASSUMED_LOSS": 17
+            },
+            "ratios": {
+              "1:20": 102,
+              "1:25": 39,
+              "1:50": 1
+            },
+            "skips": {
+              "concentration+fee": 3,
+              "confidence": 608,
+              "fee": 181,
+              "trader_guard": 2797
+            },
+            "threshold": 0.4
+          },
+          "FILTER_50%": {
+            "copied_buys": 104,
+            "eligible_buys": 3731,
+            "final_cash": 1347.2520882000686,
+            "guard_episode_count": 7652,
+            "guard_history": "same-export warmup",
+            "guard_status_counts": {
+              "INSUFFICIENT": 539,
+              "LOW": 2555,
+              "PASS": 637
+            },
+            "max_drawdown_at_cost": 0.21025056912486761,
+            "mode": "FILTER",
+            "net_pnl": 347.25208820006856,
+            "net_win_rate": 0.6057692307692307,
+            "net_wins": 63,
+            "outcomes": {
+              "SOURCE_SELL": 92,
+              "TIMEOUT_ASSUMED_LOSS": 12
+            },
+            "ratios": {
+              "1:20": 79,
+              "1:25": 25
+            },
+            "skips": {
+              "confidence": 406,
+              "fee": 127,
+              "trader_guard": 3094
+            },
+            "threshold": 0.5
+          },
+          "OFF": {
+            "copied_buys": 115,
+            "eligible_buys": 3731,
+            "final_cash": 99.48031372510538,
+            "guard_episode_count": 7652,
+            "guard_history": "same-export warmup",
+            "guard_status_counts": {
+              "OFF": 3731
+            },
+            "max_drawdown_at_cost": 0.9460009878086946,
+            "mode": "OFF",
+            "net_pnl": -900.5196862748946,
+            "net_win_rate": 0.4260869565217391,
+            "net_wins": 49,
+            "outcomes": {
+              "SOURCE_SELL": 80,
+              "TIMEOUT_ASSUMED_LOSS": 35
+            },
+            "ratios": {
+              "1:100": 1,
+              "1:1000": 1,
+              "1:20": 31,
+              "1:25": 45,
+              "1:250": 2,
+              "1:30": 13,
+              "1:35": 11,
+              "1:40": 6,
+              "1:50": 3,
+              "1:500": 1,
+              "1:75": 1
+            },
+            "skips": {
+              "concentration+fee": 147,
+              "concentration+fee+liquidity": 17,
+              "confidence": 3021,
+              "fee": 413,
+              "fee+liquidity": 15,
+              "liquidity": 3
+            },
+            "threshold": 0.5
+          },
+          "WARN": {
+            "copied_buys": 115,
+            "eligible_buys": 3731,
+            "final_cash": 99.48031372510538,
+            "guard_episode_count": 7652,
+            "guard_history": "same-export warmup",
+            "guard_status_counts": {
+              "INSUFFICIENT": 539,
+              "LOW": 2555,
+              "PASS": 637
+            },
+            "max_drawdown_at_cost": 0.9460009878086946,
+            "mode": "WARN",
+            "net_pnl": -900.5196862748946,
+            "net_win_rate": 0.4260869565217391,
+            "net_wins": 49,
+            "outcomes": {
+              "SOURCE_SELL": 80,
+              "TIMEOUT_ASSUMED_LOSS": 35
+            },
+            "ratios": {
+              "1:100": 1,
+              "1:1000": 1,
+              "1:20": 31,
+              "1:25": 45,
+              "1:250": 2,
+              "1:30": 13,
+              "1:35": 11,
+              "1:40": 6,
+              "1:50": 3,
+              "1:500": 1,
+              "1:75": 1
+            },
+            "skips": {
+              "concentration+fee": 147,
+              "concentration+fee+liquidity": 17,
+              "confidence": 3021,
+              "fee": 413,
+              "fee+liquidity": 15,
+              "liquidity": 3
+            },
+            "threshold": 0.5
+          }
+        },
+        "slippage_0.01": {
+          "FILTER_40%": {
+            "copied_buys": 113,
+            "eligible_buys": 3731,
+            "final_cash": 1271.6103315642258,
+            "guard_episode_count": 7652,
+            "guard_history": "same-export warmup",
+            "guard_status_counts": {
+              "INSUFFICIENT": 539,
+              "LOW": 2258,
+              "PASS": 934
+            },
+            "max_drawdown_at_cost": 0.1693098456270411,
+            "mode": "FILTER",
+            "net_pnl": 271.6103315642258,
+            "net_win_rate": 0.5752212389380531,
+            "net_wins": 65,
+            "outcomes": {
+              "SOURCE_SELL": 102,
+              "TIMEOUT_ASSUMED_LOSS": 11
+            },
+            "ratios": {
+              "1:20": 77,
+              "1:25": 35,
+              "1:50": 1
+            },
+            "skips": {
+              "concentration+fee": 3,
+              "confidence": 618,
+              "fee": 200,
+              "trader_guard": 2797
+            },
+            "threshold": 0.4
+          },
+          "FILTER_50%": {
+            "copied_buys": 79,
+            "eligible_buys": 3731,
+            "final_cash": 1109.9686312046483,
+            "guard_episode_count": 7652,
+            "guard_history": "same-export warmup",
+            "guard_status_counts": {
+              "INSUFFICIENT": 539,
+              "LOW": 2555,
+              "PASS": 637
+            },
+            "max_drawdown_at_cost": 0.21113241391531057,
+            "mode": "FILTER",
+            "net_pnl": 109.96863120464832,
+            "net_win_rate": 0.5822784810126582,
+            "net_wins": 46,
+            "outcomes": {
+              "SOURCE_SELL": 71,
+              "TIMEOUT_ASSUMED_LOSS": 8
+            },
+            "ratios": {
+              "1:20": 54,
+              "1:25": 25
+            },
+            "skips": {
+              "confidence": 416,
+              "fee": 142,
+              "trader_guard": 3094
+            },
+            "threshold": 0.5
+          },
+          "OFF": {
+            "copied_buys": 200,
+            "eligible_buys": 3731,
+            "final_cash": 690.9452156850995,
+            "guard_episode_count": 7652,
+            "guard_history": "same-export warmup",
+            "guard_status_counts": {
+              "OFF": 3731
+            },
+            "max_drawdown_at_cost": 0.8071624521193537,
+            "mode": "OFF",
+            "net_pnl": -309.05478431490053,
+            "net_win_rate": 0.47,
+            "net_wins": 94,
+            "outcomes": {
+              "SOURCE_SELL": 167,
+              "TIMEOUT_ASSUMED_LOSS": 33
+            },
+            "ratios": {
+              "1:100": 1,
+              "1:20": 28,
+              "1:25": 156,
+              "1:250": 2,
+              "1:30": 5,
+              "1:35": 4,
+              "1:50": 3,
+              "1:500": 1
+            },
+            "skips": {
+              "concentration+fee": 22,
+              "concentration+fee+liquidity": 13,
+              "concentration+liquidity": 1,
+              "confidence": 3021,
+              "fee": 474
+            },
+            "threshold": 0.5
+          },
+          "WARN": {
+            "copied_buys": 200,
+            "eligible_buys": 3731,
+            "final_cash": 690.9452156850995,
+            "guard_episode_count": 7652,
+            "guard_history": "same-export warmup",
+            "guard_status_counts": {
+              "INSUFFICIENT": 539,
+              "LOW": 2555,
+              "PASS": 637
+            },
+            "max_drawdown_at_cost": 0.8071624521193537,
+            "mode": "WARN",
+            "net_pnl": -309.05478431490053,
+            "net_win_rate": 0.47,
+            "net_wins": 94,
+            "outcomes": {
+              "SOURCE_SELL": 167,
+              "TIMEOUT_ASSUMED_LOSS": 33
+            },
+            "ratios": {
+              "1:100": 1,
+              "1:20": 28,
+              "1:25": 156,
+              "1:250": 2,
+              "1:30": 5,
+              "1:35": 4,
+              "1:50": 3,
+              "1:500": 1
+            },
+            "skips": {
+              "concentration+fee": 22,
+              "concentration+fee+liquidity": 13,
+              "concentration+liquidity": 1,
+              "confidence": 3021,
+              "fee": 474
+            },
+            "threshold": 0.5
+          }
+        }
+      }
+    }
+  },
+  "schema": "trader_guard_backtest_v1",
+  "sha256": {
+    "history": "15577b731b09c3e3e90d689d36f79094fdc3de51f5f48250f9134c4d553c28e7",
+    "latest": "09520e58076b68ae01988a1ab788e8ed1fab5d96eec87b63e9aef889dfdeeedb",
+    "model": "9c69df7d6bb8e669674dbe51ce9931387dc6f874f9ae24d9e4615f5fc4b57b84"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "assessments": [
+    {"name":"cold warning","mode":"WARN","outcomes":[],"now":100,"threshold":0.5,"status":"INSUFFICIENT","samples":0,"wins":0,"allowed":true},
+    {"name":"cold filter","mode":"FILTER","outcomes":[],"now":100,"threshold":0.5,"status":"INSUFFICIENT","samples":0,"wins":0,"allowed":false},
+    {"name":"inclusive threshold","mode":"FILTER","outcomes":[[90,1],[89,1],[88,1],[87,1],[86,1],[85,1],[84,1],[83,1],[82,1],[81,1],[80,-1],[79,-1],[78,-1],[77,-1],[76,-1],[75,-1],[74,-1],[73,-1],[72,-1],[71,-1]],"now":100,"threshold":0.5,"status":"PASS","samples":20,"wins":10,"allowed":true},
+    {"name":"higher threshold","mode":"FILTER","outcomes":[[90,1],[89,1],[88,1],[87,1],[86,1],[85,1],[84,1],[83,1],[82,1],[81,1],[80,-1],[79,-1],[78,-1],[77,-1],[76,-1],[75,-1],[74,-1],[73,-1],[72,-1],[71,-1]],"now":100,"threshold":0.6,"status":"LOW","samples":20,"wins":10,"allowed":false},
+    {"name":"low warning allowed","mode":"WARN","outcomes":[[90,-1],[89,-1],[88,-1],[87,-1],[86,-1],[85,-1],[84,-1],[83,-1],[82,-1],[81,-1],[80,-1],[79,-1],[78,-1],[77,-1],[76,-1],[75,-1],[74,-1],[73,-1],[72,-1],[71,-1]],"now":100,"threshold":0.5,"status":"LOW","samples":20,"wins":0,"allowed":true},
+    {"name":"future and same-time excluded","mode":"FILTER","outcomes":[[101,1],[100,1],[90,1],[89,1],[88,1],[87,1],[86,1],[85,1],[84,1],[83,1],[82,1],[81,1],[80,-1],[79,-1],[78,-1],[77,-1],[76,-1],[75,-1],[74,-1],[73,-1],[72,-1],[71,-1]],"now":100,"threshold":0.5,"status":"PASS","samples":20,"wins":10,"allowed":true},
+    {"name":"last20 only","mode":"FILTER","outcomes":[[90,-1],[89,-1],[88,-1],[87,-1],[86,-1],[85,-1],[84,-1],[83,-1],[82,-1],[81,-1],[80,-1],[79,-1],[78,-1],[77,-1],[76,-1],[75,-1],[74,-1],[73,-1],[72,-1],[71,-1],[69,1],[68,1],[67,1],[66,1],[65,1],[64,1],[63,1],[62,1],[61,1],[60,1],[59,1],[58,1],[57,1],[56,1],[55,1],[54,1],[53,1],[52,1],[51,1],[50,1]],"now":100,"threshold":0.5,"status":"LOW","samples":20,"wins":0,"allowed":false},
+    {"name":"zero net is not a win","mode":"FILTER","outcomes":[[90,0],[89,0],[88,0],[87,0],[86,0],[85,0],[84,0],[83,0],[82,0],[81,0],[80,0],[79,0],[78,0],[77,0],[76,0],[75,0],[74,0],[73,0],[72,0],[71,0]],"now":100,"threshold":0.01,"status":"LOW","samples":20,"wins":0,"allowed":false},
+    {"name":"off is informational","mode":"OFF","outcomes":[],"now":100,"threshold":0.5,"status":"OFF","samples":0,"wins":0,"allowed":true}
+  ],
+  "valuations": [
+    {"source":500,"entry":100,"exit":110,"net":0.6},
+    {"source":500,"entry":100,"exit":101,"net":-1.65},
+    {"source":500,"entry":100,"exit":null,"net":-25.95},
+    {"source":500,"entry":100,"exit":0.01,"net":-25.95},
+    {"source":1000,"entry":100,"exit":110,"net":3.1},
+    {"source":20000,"entry":100,"exit":200,"net":985.0}
+  ]
+}
