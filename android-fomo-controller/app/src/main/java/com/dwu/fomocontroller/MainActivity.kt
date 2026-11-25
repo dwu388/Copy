@@ -24,6 +24,8 @@ import com.dwu.fomocontroller.data.EventDatabase
 import com.dwu.fomocontroller.model.ControllerMode
 import com.dwu.fomocontroller.strategy.AdaptiveHybridEngine
 import com.dwu.fomocontroller.strategy.TraderGuardMode
+import com.dwu.fomocontroller.strategy.EntryStyle
+import com.dwu.fomocontroller.strategy.PaperForecast
 import java.io.File
 import java.text.DateFormat
 import java.util.Date
@@ -36,6 +38,11 @@ class MainActivity : Activity() {
     private lateinit var feeSpinner: Spinner
     private lateinit var traderGuardSpinner: Spinner
     private lateinit var traderRateInput: EditText
+    private lateinit var entryStyleSpinner: Spinner
+    private lateinit var paperForecastSpinner: Spinner
+    private lateinit var entryCapInput: EditText
+    private lateinit var entrySourceInput: EditText
+    private lateinit var lossLimitInput: EditText
     private lateinit var maxAgeInput: EditText
     private lateinit var statusView: TextView
     private lateinit var recorderView: TextView
@@ -103,6 +110,79 @@ class MainActivity : Activity() {
             )
         }
         root.addView(feeSpinner)
+
+        root.addView(label("Entry selection"))
+        entryStyleSpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
+                listOf("MODEL — forecast + risk controls", "RULE_ONLY — paper only, hard fee ceiling"))
+        }
+        root.addView(entryStyleSpinner)
+        root.addView(label("DRY_RUN forecast"))
+        paperForecastSpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
+                listOf("CORRECTED — calibrated 24h paper experiment", "LEGACY — bundled/active champion comparison"))
+        }
+        root.addView(paperForecastSpinner)
+        entryCapInput = numberInput()
+        entrySourceInput = numberInput()
+        lossLimitInput = numberInput()
+        root.addView(label("Entry market cap must be below (USD)")); root.addView(entryCapInput)
+        root.addView(label("Minimum source purchase (USD)")); root.addView(entrySourceInput)
+        root.addView(label("Pause new entries at drawdown (%)")); root.addView(lossLimitInput)
+        root.addView(TextView(this).apply {
+            text = "Loss pause is latched until acknowledged. Fresh notification marks can reveal losses before a sell; " +
+                "unpriced positions remain at cost and are shown separately. These are not live executable prices. Sells remain enabled."
+            textSize = 13f
+        })
+        root.addView(Button(this).apply {
+            text = "Apply paper preset + archive/start new $1,000 session"
+            setOnClickListener {
+                runCatching {
+                    require(prefs.mode != ControllerMode.PREPARE) { "Switch to OBSERVE and resolve prepared trades first." }
+                    prefs.mode = ControllerMode.OBSERVE
+                    AutomationCoordinator.pauseAndClearQueue()
+                    prefs.entryStyle = EntryStyle.MODEL
+                    prefs.paperForecast = PaperForecast.CORRECTED
+                    prefs.entryMaxCap = 50000.0
+                    prefs.entryMinSource = 1000.0
+                    prefs.lossPauseFraction = .20
+                    prefs.traderGuardMode = TraderGuardMode.WARN
+                    prefs.traderMinimumWinRate = .50
+                    AdaptiveHybridEngine.startNewPaperSession()
+                    prefs.mode = ControllerMode.DRY_RUN
+                }.onSuccess {
+                    Toast.makeText(this@MainActivity, "New experimental paper session started; prior ledger archived.", Toast.LENGTH_LONG).show()
+                }.onFailure { error ->
+                    Toast.makeText(this@MainActivity, "Paper session not started: ${error.message}", Toast.LENGTH_LONG).show()
+                }
+                loadSettingsIntoUi(); refresh()
+            }
+        })
+        root.addView(Button(this).apply {
+            text = "Archive/start $1,000 paper session using saved settings"
+            setOnClickListener {
+                runCatching {
+                    require(prefs.mode != ControllerMode.PREPARE) { "Switch to OBSERVE and resolve prepared trades first." }
+                    prefs.mode = ControllerMode.OBSERVE
+                    AutomationCoordinator.pauseAndClearQueue()
+                    AdaptiveHybridEngine.startNewPaperSession()
+                    prefs.mode = ControllerMode.DRY_RUN
+                }.onSuccess {
+                    Toast.makeText(this@MainActivity, "Paper session started with saved strategy settings.", Toast.LENGTH_LONG).show()
+                }.onFailure { error ->
+                    Toast.makeText(this@MainActivity, "Paper session not started: ${error.message}", Toast.LENGTH_LONG).show()
+                }
+                loadSettingsIntoUi(); refresh()
+            }
+        })
+        root.addView(Button(this).apply {
+            text = "Resume paper entries / acknowledge a new loss anchor"
+            setOnClickListener {
+                runCatching { AdaptiveHybridEngine.resumePaperEntries() }
+                    .onFailure { error -> Toast.makeText(this@MainActivity, error.message, Toast.LENGTH_LONG).show() }
+                refresh()
+            }
+        })
 
         root.addView(label("Trader win-rate guard"))
         traderGuardSpinner = Spinner(this).apply {
@@ -203,7 +283,7 @@ class MainActivity : Activity() {
         })
 
         root.addView(Button(this).apply {
-            text = "Export trader win-rate audit"
+            text = "Export trader and paper-safety audit"
             setOnClickListener {
                 val directory = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
                     ?: File(filesDir, "exports")
@@ -280,12 +360,20 @@ class MainActivity : Activity() {
         feeSpinner.setSelection(if (prefs.feeDiscount == 0.10) 1 else 0)
         traderGuardSpinner.setSelection(TraderGuardMode.entries.indexOf(prefs.traderGuardMode))
         traderRateInput.setText((prefs.traderMinimumWinRate * 100).toString())
+        entryStyleSpinner.setSelection(EntryStyle.entries.indexOf(prefs.entryStyle))
+        paperForecastSpinner.setSelection(PaperForecast.entries.indexOf(prefs.paperForecast))
+        entryCapInput.setText(prefs.entryMaxCap.toString())
+        entrySourceInput.setText(prefs.entryMinSource.toString())
+        lossLimitInput.setText((prefs.lossPauseFraction * 100).toString())
         maxAgeInput.setText(prefs.maxEventAgeSeconds.toString())
     }
 
     private fun saveSettings() {
         val maxAge = maxAgeInput.text.toString().toLongOrNull()
         val traderRate = traderRateInput.text.toString().toDoubleOrNull()
+        val cap = entryCapInput.text.toString().toDoubleOrNull()
+        val source = entrySourceInput.text.toString().toDoubleOrNull()
+        val loss = lossLimitInput.text.toString().toDoubleOrNull()
 
         if (maxAge == null || maxAge <= 0L) {
             Toast.makeText(this, "Enter a positive maximum event age.", Toast.LENGTH_LONG).show()
@@ -296,11 +384,21 @@ class MainActivity : Activity() {
             Toast.makeText(this, "Enter a trader win rate from 0 to 100%.", Toast.LENGTH_LONG).show()
             return
         }
+        if (cap == null || !cap.isFinite() || cap <= 0 || source == null || !source.isFinite() || source < 0 ||
+            loss == null || !loss.isFinite() || loss <= 0 || loss >= 100) {
+            Toast.makeText(this, "Enter a positive cap, nonnegative source minimum, and loss limit between 0 and 100%.", Toast.LENGTH_LONG).show()
+            return
+        }
 
         prefs.feeDiscount = if (feeSpinner.selectedItemPosition == 1) 0.10 else 0.0
         prefs.maxEventAgeSeconds = maxAge
         prefs.traderGuardMode = TraderGuardMode.entries[traderGuardSpinner.selectedItemPosition]
         prefs.traderMinimumWinRate = traderRate / 100.0
+        prefs.entryStyle = EntryStyle.entries[entryStyleSpinner.selectedItemPosition]
+        prefs.paperForecast = PaperForecast.entries[paperForecastSpinner.selectedItemPosition]
+        prefs.entryMaxCap = cap
+        prefs.entryMinSource = source
+        prefs.lossPauseFraction = loss / 100.0
         Toast.makeText(this, "Settings saved.", Toast.LENGTH_SHORT).show()
         refreshStatus()
     }
@@ -449,6 +547,8 @@ class MainActivity : Activity() {
             append(AdaptiveHybridEngine.modelDescription())
             append("\nTrader guard: ")
             append(AdaptiveHybridEngine.traderGuardDescription())
+            append("\nEntry safety: ")
+            append(AdaptiveHybridEngine.entrySafetyDescription())
             append("\nStrategy: mode=")
             append(strategy.mode)
             append(" stage=")

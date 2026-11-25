@@ -45,8 +45,8 @@ def size_and_net(source: float, gross_roi: float, predicted_roi: float,
         principal = source / ratio
         buy_fee = fee(principal, discount)
         burden = 2 * buy_fee / principal + 2 * slippage
-        if (burden > mode["fee_burden_trigger"]
-                and conservative < mode["fee_margin_multiple"] * burden):
+        if (conservative <= burden or (burden > mode["fee_burden_trigger"]
+                and conservative < mode["fee_margin_multiple"] * burden)):
             continue
         proceeds = max(0.0, principal * (1 + gross_roi) * (1 - slippage))
         net = proceeds - fee(proceeds, discount) - principal - buy_fee
@@ -105,8 +105,8 @@ def main() -> None:
     if not dates[0] <= dates[1] < dates[2] or args.min_validation_lifecycles < 1:
         parser.error("Require train-before <= validation-start < test-start and a positive minimum")
     frame = load_learning_csv(args.dataset)
-    train = frame.loc[frame.exit_time.lt(dates[0])]
-    validation = frame.loc[frame.entry_time.ge(dates[1]) & frame.exit_time.lt(dates[2])]
+    train = frame.loc[frame.label_available_time.lt(dates[0])]
+    validation = frame.loc[frame.entry_time.ge(dates[1]) & frame.label_available_time.lt(dates[2])]
     test = frame.loc[frame.entry_time.ge(dates[2])]
     if min(map(len, (train, validation, test))) == 0:
         parser.error("Training, validation and test each need resolved rows")
@@ -126,7 +126,7 @@ def main() -> None:
     chosen = max(eligible, key=lambda t: (candidates[str(t)]["lifecycle_wilson_lower_95"],
                                           candidates[str(t)]["selected_lifecycles"], -t)) if eligible else None
     report = {
-        "label": "first-later-sell market-cap ROI; no actual fills or partial-sale quantities",
+        "label": "mature 24h notification-policy ROI; missing timeout quote assumes full loss; no actual fills",
         "scope": "per-opportunity NORMAL mode; ratio/fee gate only; no wallet, exposure, reserves, mode changes or execution latency",
         "fee_discount": args.fee_discount,
         "assumed_stage_ratio": "1:20",

@@ -8,6 +8,7 @@ import java.util.Locale
 import java.util.zip.GZIPInputStream
 import kotlin.math.exp
 import kotlin.math.ln1p
+import kotlin.math.ln
 
 data class HybridScore(
     val excluded: Boolean,
@@ -33,6 +34,7 @@ class AdaptiveHybridModel private constructor(
     val parentModelId: String?,
     val trainedThrough: String,
     val matchingRule: String,
+    val labelContract: String,
     val roiUncertaintyScale: Double,
     /** Legacy generation-0 bootstrap only. Active policy is loaded separately. */
     val config: StrategyConfig?,
@@ -41,6 +43,7 @@ class AdaptiveHybridModel private constructor(
     private val classifier: Ensemble,
     private val regressor: Ensemble,
     private val recentAdapter: RecentAdapter?,
+    private val calibration: Pair<Double, Double>?,
     val parityFixtures: List<ModelParityFixture>
 ) {
     fun score(trader: String, marketCap: Double, sourceBuyUsd: Double): HybridScore {
@@ -52,10 +55,14 @@ class AdaptiveHybridModel private constructor(
 
         val stableProbability = sigmoid(classifier.predict(trader, marketCap, sourceBuyUsd))
         val stableRoi = regressor.predict(trader, marketCap, sourceBuyUsd)
-        val probability = recentAdapter?.let { adapter ->
+        val blendedProbability = recentAdapter?.let { adapter ->
             (1.0 - adapter.probabilityWeight) * stableProbability +
                 adapter.probabilityWeight * sigmoid(adapter.classifier.predict(trader, marketCap, sourceBuyUsd))
         } ?: stableProbability
+        val probability = calibration?.let { (slope, intercept) ->
+            val clipped = blendedProbability.coerceIn(1e-12, 1 - 1e-12)
+            sigmoid(slope * ln(clipped / (1 - clipped)) + intercept)
+        } ?: blendedProbability
         val roi = recentAdapter?.let { adapter ->
             (1.0 - adapter.roiWeight) * stableRoi +
                 adapter.roiWeight * adapter.regressor.predict(trader, marketCap, sourceBuyUsd)
@@ -171,8 +178,9 @@ class AdaptiveHybridModel private constructor(
         // file as adaptive_hybrid_v2.json and transparently decompresses it.
         private const val ASSET = "adaptive_hybrid_v2.json"
 
-        fun fromAssets(context: Context): AdaptiveHybridModel {
-            val root = context.assets.open(ASSET).bufferedReader(Charsets.UTF_8).use { reader ->
+        fun fromAssets(context: Context, assetName: String = ASSET): AdaptiveHybridModel {
+            require(assetName == ASSET || assetName == "corrected_paper_v1.json")
+            val root = context.assets.open(assetName).bufferedReader(Charsets.UTF_8).use { reader ->
                 JSONObject(reader.readText())
             }
             return fromJson(root)
@@ -212,6 +220,13 @@ class AdaptiveHybridModel private constructor(
                     parseEnsemble(json.getJSONObject("regressor"))
                 )
             }
+            val calibration = root.optJSONObject("probabilityCalibration")?.let {
+                require(it.getString("schemaVersion") == "platt_oos_v1")
+                val slope = it.getDouble("slope")
+                val intercept = it.getDouble("intercept")
+                require(slope.isFinite() && slope in 0.0..10.0 && intercept.isFinite() && intercept in -20.0..20.0)
+                slope to intercept
+            }
             return AdaptiveHybridModel(
                 version = version.ifBlank { schemaVersion },
                 schemaVersion = schemaVersion,
@@ -219,6 +234,7 @@ class AdaptiveHybridModel private constructor(
                 parentModelId = root.optString("parentModelId").takeIf { it.isNotBlank() },
                 trainedThrough = root.getString("trainedThrough"),
                 matchingRule = root.getString("matchingRule"),
+                labelContract = root.optString("labelContract", ""),
                 roiUncertaintyScale = root.getDouble("roiUncertaintyScale"),
                 config = root.optJSONObject("config")?.let(StrategyConfig::fromJson),
                 excludedTraders = root.getJSONArray("excludedTraders").strings()
@@ -227,6 +243,7 @@ class AdaptiveHybridModel private constructor(
                 classifier = parseEnsemble(root.getJSONObject("classifier")),
                 regressor = parseEnsemble(root.getJSONObject("regressor")),
                 recentAdapter = adapter,
+                calibration = calibration,
                 parityFixtures = root.getJSONArray("fixtures").objects().map { fixture ->
                     ModelParityFixture(
                         trader = fixture.getString("trader"),

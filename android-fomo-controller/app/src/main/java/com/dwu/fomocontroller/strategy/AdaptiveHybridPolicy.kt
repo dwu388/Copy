@@ -238,11 +238,12 @@ object AdaptiveHybridPolicy {
         roiUncertaintyScale: Double,
         openByTrader: Map<String, Double>,
         openByToken: Map<String, Double>,
-        recentEntries: List<RecentEntry>
+        recentEntries: List<RecentEntry>,
+        useForecast: Boolean = true
     ): PolicyDecision {
         val mode = cfg.modes.getValue(state.mode)
         val stageRatio = promotionRatios[state.stageIndex]
-        if (confidence < mode.confidenceThreshold) {
+        if (useForecast && confidence < mode.confidenceThreshold) {
             return PolicyDecision(false, "MODE_CONFIDENCE", state.mode, stageRatio, max(stageRatio, mode.ratioFloor))
         }
         val effectiveRatio = max(stageRatio, mode.ratioFloor)
@@ -262,7 +263,12 @@ object AdaptiveHybridPolicy {
             val fee = orderFee(size, feeDiscount)
             val burden = roundTripBurden(size, feeDiscount, cfg.slippagePerSide)
             val conservativeRoi = predictedRoi - mode.uncertaintyMultiplier * roiUncertaintyScale
-            if (burden > mode.feeBurdenTrigger && conservativeRoi < mode.feeMarginMultiple * burden) {
+            // Median-style forecast is a conservative return margin, not an
+            // expected-profit estimate. Require a positive net margin on every
+            // MODEL entry. Rule-only entries use a hard fee-burden ceiling.
+            if ((!useForecast && burden > mode.feeBurdenTrigger) ||
+                (useForecast && (conservativeRoi <= burden ||
+                    (burden > mode.feeBurdenTrigger && conservativeRoi < mode.feeMarginMultiple * burden)))) {
                 sawFee = true
                 continue
             }

@@ -1,5 +1,10 @@
 # Trader win-rate warning and eligibility guard
 
+> Historical component comparison. The integrated 0.5 preset, calibrated paper
+> artifact and current full-controller replay are documented in
+> [INTEGRATED_PAPER.md](INTEGRATED_PAPER.md). These older numbers are not results
+> for the new preset.
+
 Version 0.4.0 adds an independent historical check to the current bundled
 Adaptive Hybrid strategy. It does not replace the model, add market-cap/buy-size
 filters, change the sizing ladder, or activate the experimental model in PR #21.
